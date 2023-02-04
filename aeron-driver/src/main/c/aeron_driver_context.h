@@ -306,6 +306,7 @@ int aeron_driver_validate_unblock_timeout(aeron_driver_context_t *context);
 int aeron_driver_validate_untethered_timeouts(aeron_driver_context_t *context);
 
 int aeron_driver_context_validate_mtu_length(uint64_t mtu_length);
+int aeron_driver_context_validate_ipc_mtu_length(uint64_t mtu_length);
 
 size_t aeron_cnc_length(aeron_driver_context_t *context);
 

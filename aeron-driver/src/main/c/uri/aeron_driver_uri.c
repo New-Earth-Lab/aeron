@@ -48,7 +48,7 @@ int aeron_uri_get_term_length_param(aeron_uri_params_t *uri_params, aeron_driver
     return 0;
 }
 
-int aeron_uri_get_mtu_length_param(aeron_uri_params_t *uri_params, aeron_driver_uri_publication_params_t *params)
+int aeron_uri_get_mtu_length_param(aeron_uri_type_t type, aeron_uri_params_t *uri_params, aeron_driver_uri_publication_params_t *params)
 {
     const char *value_str;
 
@@ -62,9 +62,19 @@ int aeron_uri_get_mtu_length_param(aeron_uri_params_t *uri_params, aeron_driver_
             return -1;
         }
 
-        if (aeron_driver_context_validate_mtu_length(value) < 0)
+        if (AERON_URI_IPC == type)
         {
-            return -1;
+            if (aeron_driver_context_validate_ipc_mtu_length(value) < 0)
+            {
+                return -1;
+            }
+        }
+        else
+        {
+            if (aeron_driver_context_validate_mtu_length(value) < 0)
+            {
+                return -1;
+            }
         }
 
         params->mtu_length = value;
@@ -207,7 +217,7 @@ int aeron_diver_uri_publication_params(
         return -1;
     }
 
-    if (aeron_uri_get_mtu_length_param(uri_params, params) < 0)
+    if (aeron_uri_get_mtu_length_param(uri->type, uri_params, params) < 0)
     {
         return -1;
     }

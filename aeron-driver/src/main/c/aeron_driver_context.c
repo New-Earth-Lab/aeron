@@ -695,7 +695,7 @@ int aeron_driver_context_init(aeron_driver_context_t **context)
         getenv(AERON_IPC_MTU_LENGTH_ENV_VAR),
         _context->ipc_mtu_length,
         AERON_DATA_HEADER_LENGTH,
-        AERON_MAX_UDP_PAYLOAD_LENGTH);
+        AERON_MAX_IPC_PAYLOAD_LENGTH);
 
     _context->ipc_publication_window_length = aeron_config_parse_size64(
         AERON_IPC_PUBLICATION_TERM_WINDOW_LENGTH_ENV_VAR,
@@ -1374,6 +1374,26 @@ int aeron_driver_context_validate_mtu_length(uint64_t mtu_length)
         AERON_SET_ERR(
             EINVAL,
             "mtuLength must be a > HEADER_LENGTH and <= MAX_UDP_PAYLOAD_LENGTH: mtuLength=%" PRIu64,
+            mtu_length);
+        return -1;
+    }
+
+    if ((mtu_length & (AERON_LOGBUFFER_FRAME_ALIGNMENT - 1)) != 0)
+    {
+        AERON_SET_ERR(EINVAL, "mtuLength must be a multiple of FRAME_ALIGNMENT: mtuLength=%" PRIu64, mtu_length);
+        return -1;
+    }
+
+    return 0;
+}
+
+int aeron_driver_context_validate_ipc_mtu_length(uint64_t mtu_length)
+{
+    if (mtu_length <= AERON_DATA_HEADER_LENGTH || mtu_length > AERON_MAX_IPC_PAYLOAD_LENGTH)
+    {
+        AERON_SET_ERR(
+            EINVAL,
+            "mtuLength must be a > HEADER_LENGTH and <= MAX_IPC_PAYLOAD_LENGTH: mtuLength=%" PRIu64,
             mtu_length);
         return -1;
     }
