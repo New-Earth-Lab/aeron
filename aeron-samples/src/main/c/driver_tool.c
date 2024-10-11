@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#ifndef _MSC_VER
+#ifndef _WIN32
 
 #include <unistd.h>
 #include <getopt.h>

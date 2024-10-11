@@ -25,7 +25,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <unistd.h>
 #endif
 
@@ -244,7 +244,7 @@ int main(int argc, char **argv)
         }
         else
         {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
                 message_len = sprintf_s(small_message, sizeof(small_message) - 1, "Hello World! %" PRIu64, (uint64_t)i);
 #else
                 message_len = snprintf(small_message, sizeof(small_message) - 1, "Hello World! %" PRIu64, (uint64_t)i);

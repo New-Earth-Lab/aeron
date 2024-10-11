@@ -26,6 +26,11 @@ if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(BUILD_SHARED_LIBS ON)
 endif ()
 
+if (MINGW AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    # set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    set(BUILD_SHARED_LIBS ON)
+endif ()
+
 check_include_file("bsd/stdlib.h" BSDSTDLIB_H_EXISTS)
 check_include_file("uuid/uuid.h" UUID_H_EXISTS)
 find_library(LIBBSD_EXISTS NAMES bsd libbsd)
@@ -50,8 +55,8 @@ if (UUID_H_EXISTS)
     add_definitions(-DHAVE_UUID_H)
 endif ()
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
+if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 iphlpapi winmm)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
 

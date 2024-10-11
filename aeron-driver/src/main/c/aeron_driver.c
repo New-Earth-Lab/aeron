@@ -23,7 +23,7 @@
 #endif
 
 #include "util/aeron_platform.h"
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 #define _CRT_RAND_S
 
 #define S_IRWXU 0
@@ -81,7 +81,7 @@ int32_t aeron_randomised_int32(void)
         fprintf(stderr, "Failed to read from aeron_dev_random (%d): %s\n", errno, strerror(errno));
         exit(EXIT_FAILURE);
     }
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
     uint32_t value;
     if (0 == rand_s(&value))
     {

@@ -24,7 +24,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 
 #include <winsock2.h>
 #include <inaddr.h>

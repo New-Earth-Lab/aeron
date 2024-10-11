@@ -106,13 +106,13 @@ TEST(utilTests, numberOfTrailingZeroes)
 
 TEST(utilTests, sourcedException)
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     const std::string aeron_client_dir = " aeron-client\\";
 #else
     const std::string aeron_client_dir = " aeron-client/";
 #endif
 
-#if defined(_MSC_VER) && defined(MSVC_FILE_IS_LOWER_CASE)
+#if defined(_WIN32) && defined(MSVC_FILE_IS_LOWER_CASE)
     const std::string testutils_h_filename = "testutils.h";
 #else
     const std::string testutils_h_filename = "TestUtils.h";

@@ -19,7 +19,7 @@
 
 #include "concurrent/aeron_rb.h"
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <sys/uio.h>
 #else
 struct iovec

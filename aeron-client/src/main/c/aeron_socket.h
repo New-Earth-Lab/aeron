@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include "util/aeron_platform.h"
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -33,12 +33,12 @@
 
 typedef int aeron_socket_t;
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
-#include <WinSock2.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <windows.h>
 #include <ws2ipdef.h>
-#include <WS2tcpip.h>
+#include <ws2tcpip.h>
 #include <iphlpapi.h>
 
 // SOCKET is uint64_t but we need a signed type to match the Linux version

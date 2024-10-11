@@ -17,7 +17,7 @@
 #ifndef AERON_TESTUTILS_H
 #define AERON_TESTUTILS_H
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <unistd.h>
 #include <cstdlib>
 #else
@@ -30,7 +30,7 @@ namespace aeron { namespace test {
 
 std::string makeTempFileName()
 {
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
     char rawname[] = "/tmp/aeron-c.XXXXXXX";
     int fd = ::mkstemp(rawname);
     ::close(fd);

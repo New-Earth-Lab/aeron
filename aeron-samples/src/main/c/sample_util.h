@@ -67,7 +67,7 @@ inline void rate_reporter_on_message(rate_reporter_t *reporter, size_t length)
     AERON_SET_RELEASE(reporter->polling_fields.total_messages, reporter->polling_fields.total_messages + 1);
 }
 
-#if defined(_MSC_VER)
+#if defined(_WIN32)
 #define SNPRINTF(_buf, _len, _fmt, ...) sprintf_s(_buf, _len, _fmt, __VA_ARGS__)
 #else
 #define SNPRINTF(_buf, _len, _fmt, ...) snprintf(_buf, _len, _fmt, __VA_ARGS__)
