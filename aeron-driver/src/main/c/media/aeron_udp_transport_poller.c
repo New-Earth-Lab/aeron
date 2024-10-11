@@ -16,7 +16,7 @@
 
 #include "util/aeron_platform.h"
 
-#if !defined(AERON_COMPILER_MSVC)
+#if !defined(_WIN32)
 #include <unistd.h>
 #endif
 

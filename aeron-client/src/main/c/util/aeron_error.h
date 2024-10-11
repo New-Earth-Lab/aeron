@@ -41,7 +41,7 @@ void aeron_err_set(int errcode, const char *function, const char *filename, int 
 void aeron_err_append(const char *function, const char *filename, int line_number, const char *format, ...);
 void aeron_err_clear(void);
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 bool aeron_error_dll_process_attach();
 void aeron_error_dll_thread_detach();
 void aeron_error_dll_process_detach();

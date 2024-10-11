@@ -19,7 +19,7 @@
 #define _GNU_SOURCE
 #endif
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>

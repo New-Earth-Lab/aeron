@@ -20,7 +20,7 @@
 #include "aeron_alloc.h"
 #include "util/aeron_netutil.h"
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -213,7 +213,7 @@ int aeron_setsockopt(aeron_socket_t fd, int level, int optname, const void *optv
     return 0;
 }
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #if _WIN32_WINNT < 0x0600
 #error Unsupported windows version

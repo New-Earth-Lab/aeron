@@ -38,7 +38,7 @@ int32_t aeron_cnc_version_volatile(aeron_cnc_metadata_t *metadata)
 
 static bool aeron_cnc_map_file_is_retry_err(int err)
 {
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
     return
         ERROR_FILE_NOT_FOUND == err ||
         ERROR_PATH_NOT_FOUND == err ||

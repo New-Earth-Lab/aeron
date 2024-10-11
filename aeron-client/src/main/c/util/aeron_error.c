@@ -32,7 +32,7 @@
 #define AERON_ERR_TRAILER "...\n"
 #define AERON_ERR_DESCRIPTION_UNAVAILABLE "<Unable to get error description>";
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 const char *aeron_strerror_r(int errcode, char *buffer, size_t length)
 {
@@ -45,7 +45,7 @@ const char *aeron_strerror_r(int errcode, char *buffer, size_t length)
     return buffer;
 }
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 #include <windows.h>
 
 const char *aeron_strerror_r(int errcode, char *buffer, size_t length)
@@ -80,7 +80,7 @@ const char *aeron_strerror_r(int errcode, char *buffer, size_t length)
 
 static AERON_INIT_ONCE error_is_initialized = AERON_INIT_ONCE_VALUE;
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 static pthread_key_t error_key = TLS_OUT_OF_INDEXES;
 #else
 static pthread_key_t error_key;
@@ -97,7 +97,7 @@ static void initialize_per_thread_error(void)
 
 static void initialize_error(void)
 {
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
     if (error_key != TLS_OUT_OF_INDEXES)
     {
         return;
@@ -164,7 +164,7 @@ static aeron_per_thread_error_t *get_required_error_state(void)
 void aeron_set_errno(int errcode)
 {
     errno = errcode;
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
     switch (errcode)
     {
         case 0:
@@ -322,7 +322,7 @@ void aeron_err_clear(void)
     strcpy(error_state->errmsg, "no error");
 }
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 
 bool aeron_error_dll_process_attach()
 {

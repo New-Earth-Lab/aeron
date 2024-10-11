@@ -19,7 +19,7 @@
 #define _GNU_SOURCE
 #endif
 
-#if defined(__linux__) || defined(AERON_COMPILER_MSVC)
+#if defined(__linux__) || defined(_WIN32)
 #define AERON_NATIVE_PRETOUCH
 #endif
 
@@ -33,19 +33,19 @@
 #include "aeron_error.h"
 #include "aeron_fileutil.h"
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define AERON_FILE_SEP '\\'
 #else
 #define AERON_FILE_SEP '/'
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define AERON_FILE_SEP_STR "\\"
 #else
 #define AERON_FILE_SEP_STR "/"
 #endif
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 
 #include <windows.h>
 #include <stdbool.h>
@@ -53,18 +53,22 @@
 #include <stdio.h>
 #include <io.h>
 #include <direct.h>
+#include <share.h>
 
 #define PROT_READ  1
 #define PROT_WRITE 2
 #define MAP_FAILED ((void *)-1)
 
 #define MAP_SHARED 0x01
+
+#ifdef AERON_COMPILER_MSVC
 #define S_IRUSR _S_IREAD
 #define S_IWUSR _S_IWRITE
 #define S_IRGRP 0
 #define S_IWGRP 0
 #define S_IROTH 0
 #define S_IWOTH 0
+#endif
 
 static int aeron_mmap(aeron_mapped_file_t *mapping, int fd, bool pre_touch)
 {
@@ -555,7 +559,7 @@ int aeron_map_existing_file(aeron_mapped_file_t *mapped_file, const char *path)
     const int64_t file_length = aeron_file_length(path);
     if (-1 == file_length)
     {
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
         AERON_SET_ERR(errno, "Failed to determine the size of the file: %s", path);
         close(fd);
 #else
@@ -607,7 +611,7 @@ int aeron_publication_image_location(char *dst, size_t length, const char *aeron
 
 size_t aeron_temp_filename(char *filename, size_t length)
 {
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
     char rawname[] = "/tmp/aeron-c.XXXXXXX";
     int fd = mkstemp(rawname);
     close(fd);
@@ -693,7 +697,7 @@ int aeron_raw_log_map_existing(aeron_mapped_raw_log_t *mapped_raw_log, const cha
     const int64_t file_length = aeron_file_length(path);
     if (-1 == file_length)
     {
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
         AERON_SET_ERR(errno, "Failed to determine the size of the existing raw log, filename: %s", path);
         close(fd);
 #else
@@ -789,7 +793,7 @@ bool aeron_raw_log_free(aeron_mapped_raw_log_t *mapped_raw_log, const char *file
 
 inline static const char *tmp_dir(void)
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     static char buff[MAX_PATH + 1];
 
     if (GetTempPath(MAX_PATH, &buff[0]) > 0)
@@ -813,7 +817,7 @@ inline static const char *tmp_dir(void)
 
 inline static bool has_file_separator_at_end(const char *path)
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     const char last = path[strlen(path) - 1];
     return last == '\\' || last == '/';
 #else
@@ -827,7 +831,7 @@ inline static bool has_file_separator_at_end(const char *path)
 
 inline static const char *username(void)
 {
-#if (_MSC_VER)
+#if (_WIN32)
     const char *username = getenv("USER");
 
     if (NULL == username)
@@ -862,7 +866,7 @@ int aeron_default_path(char *path, size_t path_length)
 {
 #if defined(__linux__)
     return snprintf(path, path_length, "/dev/shm/aeron-%s", username());
-#elif defined(_MSC_VER)
+#elif defined(_WIN32)
     return snprintf(
         path, path_length, "%s%saeron-%s", tmp_dir(), has_file_separator_at_end(tmp_dir()) ? "" : "\\", username());
 #else

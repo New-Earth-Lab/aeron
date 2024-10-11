@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <errno.h>
-#if !defined(AERON_COMPILER_MSVC)
+#if !defined(_WIN32)
 #include <unistd.h>
 #endif
 

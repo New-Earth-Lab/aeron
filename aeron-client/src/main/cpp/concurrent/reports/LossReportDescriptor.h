@@ -79,7 +79,7 @@ static const std::string LOSS_REPORT_FILE_NAME = "loss-report.dat";
 
 inline static std::string file(std::string &aeronDirectoryName)
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     return aeronDirectoryName + "\\" + LOSS_REPORT_FILE_NAME;
 #else
     return aeronDirectoryName + "/" + LOSS_REPORT_FILE_NAME;

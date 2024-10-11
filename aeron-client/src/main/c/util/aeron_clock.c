@@ -23,7 +23,7 @@
 #include "util/aeron_clock.h"
 #include "concurrent/aeron_atomic.h"
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 
 #include <windows.h>
 

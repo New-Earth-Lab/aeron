@@ -26,7 +26,7 @@
 namespace aeron { namespace util
 {
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define AERON_FILE_SEP '\\'
 #else
 #define AERON_FILE_SEP '/'
@@ -44,7 +44,7 @@ static constexpr const char *past_prefix(const char * const prefix, const char *
     #define __SHORT_FILE__ __FILE__
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
     #define SOURCEINFO __FUNCTION__,  __SHORT_FILE__, __LINE__
 #else
     #define SOURCEINFO  __PRETTY_FUNCTION__,  __SHORT_FILE__, __LINE__

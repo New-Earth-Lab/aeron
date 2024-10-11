@@ -25,7 +25,7 @@
 #include "util/ScopeUtils.h"
 #include "util/Platform.h"
 
-#if !defined(AERON_COMPILER_MSVC)
+#if !defined(_WIN32)
 #include <pthread.h>
 #endif
 
@@ -118,7 +118,7 @@ public:
         m_thread = std::thread(
             [&]()
             {
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 #elif defined(Darwin)
                 pthread_setname_np(m_name.c_str());
 #else

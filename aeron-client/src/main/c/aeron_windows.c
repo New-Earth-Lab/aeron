@@ -15,22 +15,24 @@
  */
 #include "util/aeron_platform.h"
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 #include "aeron_windows.h"
 #include "util/aeron_error.h"
 
-#include <WinSock2.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <windows.h>
 #include <time.h>
 #include <intrin.h>
 
 #include "concurrent/aeron_thread.h"
 #include "aeron_alloc.h"
 
+#if defined(AERON_COMPILER_MSVC)
 #define __builtin_bswap32 _byteswap_ulong
 #define __builtin_bswap64 _byteswap_uint64
 #define __builtin_popcount __popcnt
 #define __builtin_popcountll __popcnt64
+#endif
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -58,6 +60,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
+#if defined(AERON_COMPILER_MSVC)
 typedef struct { UINT64 q[2]; } aeron_uint128_t;
 
 aeron_uint128_t make_aeron_uint128_t(UINT64 x)
@@ -177,6 +180,7 @@ BOOL aeron_ipv6_does_prefix_match(struct in6_addr *in6_addr1, struct in6_addr *i
 
     return aeron_uint128_equals(aeron_uint128_bitwise_and(addr1, netmask), aeron_uint128_bitwise_and(addr2, netmask));
 }
+#endif
 
 void aeron_srand48(uint64_t aeron_nano_clock)
 {

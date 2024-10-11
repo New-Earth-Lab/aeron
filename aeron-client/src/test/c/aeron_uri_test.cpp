@@ -116,7 +116,7 @@ TEST_F(UriTest, shouldParseWithMultipleParams)
     EXPECT_EQ(std::string(m_uri.params.udp.additional_params.array[0].value), "4567");
 }
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define strdup _strdup
 #endif
 

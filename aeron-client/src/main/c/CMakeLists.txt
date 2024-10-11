@@ -14,12 +14,12 @@
 
 include(CheckSymbolExists)
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
+if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 iphlpapi winmm)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
 
-if (MSVC)
+if (WIN32)
     set(AERON_STATIC_LIB_LINK_OPTS "")
 else()
     # Because dlsym() is used to load strategies.

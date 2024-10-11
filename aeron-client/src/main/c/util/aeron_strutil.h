@@ -53,7 +53,7 @@ inline uint64_t aeron_fnv_64a_buf(uint8_t *buf, size_t len)
     return hval;
 }
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define strdup _strdup
 #endif
 
