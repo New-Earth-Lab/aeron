@@ -17,7 +17,7 @@
 include(CheckSymbolExists)
 
 if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
+    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi winmm)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
 

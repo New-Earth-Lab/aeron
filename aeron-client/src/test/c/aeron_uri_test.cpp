@@ -224,6 +224,10 @@ TEST_F(UriTest, shouldParsePublicationWindow)
     EXPECT_STREQ("128k", aeron_uri_find_param_value(&m_uri.params.udp.additional_params, AERON_URI_PUBLICATION_WINDOW_KEY));
 }
 
+#ifdef _WIN32
+#define strdup _strdup
+#endif
+
 /*
  * WARNING: single threaded only due to global lookup func usage
  */
