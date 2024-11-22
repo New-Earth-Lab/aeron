@@ -253,12 +253,12 @@ class ReplaySession implements Session, AutoCloseable
         return segmentFileBasePosition;
     }
 
-    void sendPendingError(final ControlResponseProxy controlResponseProxy)
+    void sendPendingError()
     {
-        if (null != errorMessage && !controlSession.isDone())
+        if (null != errorMessage)
         {
             onPendingError(sessionId, recordingId, errorMessage);
-            controlSession.attemptErrorResponse(correlationId, errorMessage, controlResponseProxy);
+            controlSession.sendErrorResponse(correlationId, ArchiveException.GENERIC, errorMessage);
         }
     }
 
@@ -302,7 +302,7 @@ class ReplaySession implements Session, AutoCloseable
                     }
                 }
 
-                controlSession.asyncSendReplayOkResponse(correlationId, sessionId);
+                controlSession.asyncSendOkResponse(correlationId, sessionId);
             }
         }
 

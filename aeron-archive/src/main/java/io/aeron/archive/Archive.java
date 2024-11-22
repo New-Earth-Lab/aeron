@@ -41,14 +41,17 @@ import org.agrona.concurrent.status.StatusIndicator;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.nio.channels.FileChannel;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Supplier;
 
 import static io.aeron.Aeron.NULL_VALUE;
@@ -57,10 +60,10 @@ import static io.aeron.CommonContext.ENDPOINT_PARAM_NAME;
 import static io.aeron.archive.Archive.Configuration.ARCHIVE_CONTROL_SESSIONS_TYPE_ID;
 import static io.aeron.archive.Archive.Configuration.ERROR_BUFFER_LENGTH_DEFAULT;
 import static io.aeron.archive.ArchiveThreadingMode.DEDICATED;
+import static io.aeron.exceptions.AeronException.Category.ERROR;
 import static io.aeron.logbuffer.LogBufferDescriptor.*;
 import static java.lang.System.getProperty;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.agrona.BitUtil.CACHE_LINE_LENGTH;
 import static org.agrona.BitUtil.isPowerOfTwo;
 import static org.agrona.BufferUtil.allocateDirectAligned;
@@ -972,13 +975,20 @@ public final class Archive implements AutoCloseable
      */
     public static final class Context implements Cloneable
     {
-        /**
-         * Using an integer because there is no support for boolean. 1 is concluded, 0 is not concluded.
-         */
-        private static final AtomicIntegerFieldUpdater<Context> IS_CONCLUDED_UPDATER = newUpdater(
-            Context.class, "isConcluded");
-        private volatile int isConcluded;
+        private static final VarHandle IS_CONCLUDED_VH;
+        static
+        {
+            try
+            {
+                IS_CONCLUDED_VH = MethodHandles.lookup().findVarHandle(Context.class, "isConcluded", boolean.class);
+            }
+            catch (final ReflectiveOperationException ex)
+            {
+                throw new ExceptionInInitializerError(ex);
+            }
+        }
 
+        private volatile boolean isConcluded;
         private boolean deleteArchiveOnStart = Configuration.deleteArchiveOnStart();
         private boolean ownsAeronClient = false;
         private String aeronDirectoryName = CommonContext.getAeronDirectoryName();
@@ -1057,6 +1067,7 @@ public final class Archive implements AutoCloseable
         private Counter totalReadBytesCounter;
         private Counter totalReadTimeCounter;
         private Counter maxReadTimeCounter;
+        private String secureRandomAlgorithm = CommonContext.getSecureRandomAlgorithm();
 
         /**
          * Perform a shallow copy of the object.
@@ -1081,7 +1092,7 @@ public final class Archive implements AutoCloseable
         @SuppressWarnings("MethodLength")
         public void conclude()
         {
-            if (0 != IS_CONCLUDED_UPDATER.getAndSet(this, 1))
+            if ((boolean)IS_CONCLUDED_VH.getAndSet(this, true))
             {
                 throw new ConcurrentConcludeException();
             }
@@ -1561,7 +1572,7 @@ public final class Archive implements AutoCloseable
          */
         public boolean isConcluded()
         {
-            return 1 == isConcluded;
+            return isConcluded;
         }
 
         /**
@@ -3456,6 +3467,61 @@ public final class Archive implements AutoCloseable
         {
             this.authorisationServiceSupplier = authorisationServiceSupplier;
             return this;
+        }
+
+        /**
+         * Get the secure random algorithm should be used by various Aeron components.
+         *
+         * @return the secure random algorithm to be used.
+         * @see #secureRandomAlgorithm(String)
+         */
+        public String secureRandomAlgorithm()
+        {
+            return secureRandomAlgorithm;
+        }
+
+        /**
+         * Define which secure random algorithm should be used by various Aeron components. This string will be passed
+         * to {@link java.security.SecureRandom#getInstance(String)}, with one exception. The special case of
+         * <code>strong</code> (case-insensitive) will use {@link SecureRandom#getInstanceStrong()}
+         *
+         * @param algorithm the algorithm to be used or <code>strong</code>
+         * @return this for the fluent API.
+         * @see CommonContext#getSecureRandomAlgorithm()
+         * @see CommonContext#SECURE_RANDOM_ALGORITHM_PROP_NAME
+         * @see CommonContext#SECURE_RANDOM_ALGORITHM_DEFAULT
+         */
+        public Context secureRandomAlgorithm(final String algorithm)
+        {
+            this.secureRandomAlgorithm = algorithm;
+            return this;
+        }
+
+        /**
+         * Get the configured instance of SecureRandom using {@link SecureRandom#getInstanceStrong()} if
+         * <code>strong</code> is specified.
+         *
+         * @return instance of SecureRandom
+         * @throws AeronException if there is a problem resolving the algorithm
+         */
+        public SecureRandom secureRandom()
+        {
+            try
+            {
+                if ("strong".equalsIgnoreCase(secureRandomAlgorithm))
+                {
+                    return SecureRandom.getInstanceStrong();
+                }
+                else
+                {
+                    return SecureRandom.getInstance(secureRandomAlgorithm);
+                }
+            }
+            catch (final NoSuchAlgorithmException ex)
+            {
+                throw new AeronException(
+                    "unable to create SecureRandom for algorithm=" + secureRandomAlgorithm, ex, ERROR);
+            }
         }
 
         CountDownLatch abortLatch()

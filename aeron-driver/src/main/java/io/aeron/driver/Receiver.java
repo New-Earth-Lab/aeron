@@ -218,6 +218,7 @@ public final class Receiver implements Agent
 
     void onNewPublicationImage(final ReceiveChannelEndpoint channelEndpoint, final PublicationImage image)
     {
+        disconnectInactiveImage(channelEndpoint, image.streamId(), image.sessionId());
         publicationImages = ArrayUtil.add(publicationImages, image);
         channelEndpoint.dispatcher().addPublicationImage(image);
     }
@@ -334,6 +335,18 @@ public final class Receiver implements Agent
         channelEndpoint.updateControlAddress(transportIndex, newAddress);
     }
 
+    void onRejectImage(final long imageCorrelationId, final long position, final String reason)
+    {
+        for (final PublicationImage image : publicationImages)
+        {
+            if (imageCorrelationId == image.correlationId())
+            {
+                image.reject(reason);
+                break;
+            }
+        }
+    }
+
     private void checkPendingSetupMessages(final long nowNs)
     {
         for (int lastIndex = pendingSetupMessages.size() - 1, i = lastIndex; i >= 0; i--)
@@ -353,6 +366,22 @@ public final class Receiver implements Agent
                     pending.channelEndpoint().sendSetupElicitingStatusMessage(
                         pending.transportIndex(), pending.controlAddress(), pending.sessionId(), pending.streamId());
                 }
+            }
+        }
+    }
+
+    void disconnectInactiveImage(
+        final ReceiveChannelEndpoint channelEndpoint,
+        final int streamId,
+        final int sessionId)
+    {
+        for (final PublicationImage publicationImage : publicationImages)
+        {
+            if (publicationImage.channelEndpoint() == channelEndpoint &&
+                publicationImage.streamId() == streamId &&
+                publicationImage.sessionId() == sessionId)
+            {
+                publicationImage.stopStatusMessagesIfNotActive();
             }
         }
     }

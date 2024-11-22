@@ -124,10 +124,10 @@ int aeron_image_delete(aeron_image_t *image)
 
 void aeron_image_force_close(aeron_image_t *image)
 {
-    AERON_GET_VOLATILE(image->eos_position, image->metadata->end_of_stream_position);
-    AERON_PUT_ORDERED(image->final_position, *image->subscriber_position);
-    AERON_PUT_ORDERED(image->is_eos, (image->final_position >= image->eos_position));
-    AERON_PUT_ORDERED(image->is_closed, true);
+    AERON_GET_ACQUIRE(image->eos_position, image->metadata->end_of_stream_position);
+    AERON_SET_RELEASE(image->final_position, *image->subscriber_position);
+    AERON_SET_RELEASE(image->is_eos, (image->final_position >= image->eos_position));
+    AERON_SET_RELEASE(image->is_closed, true);
 }
 
 int aeron_image_constants(aeron_image_t *image, aeron_image_constants_t *constants)
@@ -165,7 +165,7 @@ int64_t aeron_image_position(aeron_image_t *image)
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return image->final_position;
@@ -183,7 +183,7 @@ int aeron_image_set_position(aeron_image_t *image, int64_t position)
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (!is_closed)
     {
         if (aeron_image_validate_position(image, position) < 0)
@@ -191,7 +191,7 @@ int aeron_image_set_position(aeron_image_t *image, int64_t position)
             return -1;
         }
 
-        AERON_PUT_ORDERED(*image->subscriber_position, position);
+        AERON_SET_RELEASE(*image->subscriber_position, position);
     }
 
     return 0;
@@ -206,15 +206,15 @@ bool aeron_image_is_end_of_stream(aeron_image_t *image)
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return image->is_eos;
     }
 
     int64_t end_of_stream_position, subscriber_position;
-    AERON_GET_VOLATILE(end_of_stream_position, image->metadata->end_of_stream_position);
-    AERON_GET_VOLATILE(subscriber_position, *image->subscriber_position);
+    AERON_GET_ACQUIRE(end_of_stream_position, image->metadata->end_of_stream_position);
+    AERON_GET_ACQUIRE(subscriber_position, *image->subscriber_position);
 
     return subscriber_position >= end_of_stream_position;
 }
@@ -222,14 +222,14 @@ bool aeron_image_is_end_of_stream(aeron_image_t *image)
 int64_t aeron_image_end_of_stream_position(aeron_image_t *image)
 {
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return image->eos_position;
     }
 
     int64_t end_of_stream_position;
-    AERON_GET_VOLATILE(end_of_stream_position, image->metadata->end_of_stream_position);
+    AERON_GET_ACQUIRE(end_of_stream_position, image->metadata->end_of_stream_position);
 
     return end_of_stream_position;
 }
@@ -243,14 +243,14 @@ int aeron_image_active_transport_count(aeron_image_t *image)
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
     }
 
     int32_t active_transport_count;
-    AERON_GET_VOLATILE(active_transport_count, image->metadata->active_transport_count);
+    AERON_GET_ACQUIRE(active_transport_count, image->metadata->active_transport_count);
 
     return (int)active_transport_count;
 }
@@ -268,7 +268,7 @@ int aeron_image_poll(aeron_image_t *image, aeron_fragment_handler_t handler, voi
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
@@ -284,10 +284,16 @@ int aeron_image_poll(aeron_image_t *image, aeron_fragment_handler_t handler, voi
 
     while (fragments_read < fragment_limit && offset < capacity)
     {
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
+        if (is_closed)
+        {
+            break;
+        }
+
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + offset);
         int32_t frame_length, frame_offset;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -340,7 +346,7 @@ int aeron_image_controlled_poll(
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
@@ -356,10 +362,16 @@ int aeron_image_controlled_poll(
 
     while (fragments_read < fragment_limit && offset < capacity)
     {
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
+        if (is_closed)
+        {
+            break;
+        }
+
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + offset);
         int32_t frame_length, frame_offset, aligned_frame_length;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -438,7 +450,7 @@ int aeron_image_bounded_poll(
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
@@ -461,10 +473,16 @@ int aeron_image_bounded_poll(
 
     while (fragments_read < fragment_limit && offset < limit_offset)
     {
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
+        if (is_closed)
+        {
+            break;
+        }
+
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + offset);
         int32_t frame_length, frame_offset;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -521,7 +539,7 @@ int aeron_image_bounded_controlled_poll(
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
@@ -544,10 +562,16 @@ int aeron_image_bounded_controlled_poll(
 
     while (fragments_read < fragment_limit && offset < limit_offset)
     {
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
+        if (is_closed)
+        {
+            break;
+        }
+
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + offset);
         int32_t frame_length, frame_offset, aligned_frame_length;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -626,7 +650,7 @@ int64_t aeron_image_controlled_peek(
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return initial_position;
@@ -653,10 +677,16 @@ int64_t aeron_image_controlled_peek(
 
     while (offset < limit_offset)
     {
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
+        if (is_closed)
+        {
+            break;
+        }
+
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + offset);
         int32_t frame_length, frame_offset;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -726,7 +756,7 @@ int aeron_image_block_poll(
     }
 
     bool is_closed;
-    AERON_GET_VOLATILE(is_closed, image->is_closed);
+    AERON_GET_ACQUIRE(is_closed, image->is_closed);
     if (is_closed)
     {
         return 0;
@@ -746,7 +776,7 @@ int aeron_image_block_poll(
         aeron_data_header_t *frame = (aeron_data_header_t *)(term_buffer + scan_offset);
         int32_t frame_length, aligned_frame_length;
 
-        AERON_GET_VOLATILE(frame_length, frame->frame_header.frame_length);
+        AERON_GET_ACQUIRE(frame_length, frame->frame_header.frame_length);
 
         if (frame_length <= 0)
         {
@@ -799,10 +829,30 @@ bool aeron_image_is_closed(aeron_image_t *image)
 
     if (NULL != image)
     {
-        AERON_GET_VOLATILE(is_closed, image->is_closed);
+        AERON_GET_ACQUIRE(is_closed, image->is_closed);
     }
 
     return is_closed;
+}
+
+int aeron_image_reject(aeron_image_t *image, const char *reason)
+{
+    if (NULL == image)
+    {
+        AERON_SET_ERR(EINVAL, "%s", "image is null");
+        return -1;
+    }
+
+    int64_t position = 0;
+    AERON_GET_ACQUIRE(position, *image->subscriber_position);
+
+    if (aeron_subscription_reject_image(image->subscription, image->key.correlation_id, position, reason) < 0)
+    {
+        AERON_APPEND_ERR("%s", "");
+        return -1;
+    }
+
+    return 0;
 }
 
 extern int64_t aeron_image_removal_change_number(aeron_image_t *image);

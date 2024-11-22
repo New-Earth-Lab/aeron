@@ -31,7 +31,6 @@ import java.util.ArrayDeque;
 import java.util.function.BooleanSupplier;
 
 import static io.aeron.archive.client.ArchiveException.AUTHENTICATION_REJECTED;
-import static io.aeron.archive.client.ArchiveException.GENERIC;
 import static io.aeron.archive.codecs.ControlResponseCode.*;
 
 /**
@@ -42,6 +41,7 @@ final class ControlSession implements Session
 {
     private static final long RESEND_INTERVAL_MS = 200L;
     private static final String SESSION_REJECTED_MSG = "authentication rejected";
+    private final Thread conductorThread;
 
     enum State
     {
@@ -97,6 +97,7 @@ final class ControlSession implements Session
         this.authenticator = authenticator;
         this.controlSessionProxy = controlSessionProxy;
         this.activityDeadlineMs = cachedEpochClock.time() + connectTimeoutMs;
+        conductorThread = Thread.currentThread();
     }
 
     /**
@@ -611,52 +612,53 @@ final class ControlSession implements Session
         }
     }
 
-    void sendOkResponse(final long correlationId, final ControlResponseProxy proxy)
+    void sendOkResponse(final long correlationId)
     {
-        sendResponse(correlationId, 0L, OK, null, proxy);
+        sendResponse(correlationId, 0L, OK, null);
     }
 
-    void sendOkResponse(final long correlationId, final long relevantId, final ControlResponseProxy proxy)
+    void sendOkResponse(final long correlationId, final long relevantId)
     {
-        sendResponse(correlationId, relevantId, OK, null, proxy);
+        sendResponse(correlationId, relevantId, OK, null);
     }
 
-    void sendErrorResponse(final long correlationId, final String errorMessage, final ControlResponseProxy proxy)
+    void sendErrorResponse(final long correlationId, final String errorMessage)
     {
-        sendResponse(correlationId, 0L, ERROR, errorMessage, proxy);
+        sendResponse(correlationId, 0L, ERROR, errorMessage);
     }
 
     void sendErrorResponse(
-        final long correlationId, final long relevantId, final String errorMessage, final ControlResponseProxy proxy)
+        final long correlationId, final long relevantId, final String errorMessage)
     {
-        sendResponse(correlationId, relevantId, ERROR, errorMessage, proxy);
+        sendResponse(correlationId, relevantId, ERROR, errorMessage);
     }
 
-    void sendRecordingUnknown(final long correlationId, final long recordingId, final ControlResponseProxy proxy)
+    void sendRecordingUnknown(final long correlationId, final long recordingId)
     {
-        sendResponse(correlationId, recordingId, RECORDING_UNKNOWN, null, proxy);
+        sendResponse(correlationId, recordingId, RECORDING_UNKNOWN, null);
     }
 
-    void sendSubscriptionUnknown(final long correlationId, final ControlResponseProxy proxy)
+    void sendSubscriptionUnknown(final long correlationId)
     {
-        sendResponse(correlationId, 0L, SUBSCRIPTION_UNKNOWN, null, proxy);
+        sendResponse(correlationId, 0L, SUBSCRIPTION_UNKNOWN, null);
     }
 
     void sendResponse(
         final long correlationId,
         final long relevantId,
         final ControlResponseCode code,
-        final String errorMessage,
-        final ControlResponseProxy proxy)
+        final String errorMessage)
     {
+        assertCalledOnConductorThread();
+
         if (!syncResponseQueue.isEmpty() ||
-            !proxy.sendResponse(controlSessionId, correlationId, relevantId, code, errorMessage, this))
+            !controlResponseProxy.sendResponse(controlSessionId, correlationId, relevantId, code, errorMessage, this))
         {
             queueResponse(correlationId, relevantId, code, errorMessage);
         }
     }
 
-    void asyncSendReplayOkResponse(final long correlationId, final long replaySessionId)
+    void asyncSendOkResponse(final long correlationId, final long replaySessionId)
     {
         if (!asyncResponseQueue.offer(() -> controlResponseProxy.sendResponse(
             controlSessionId,
@@ -670,26 +672,26 @@ final class ControlSession implements Session
         }
     }
 
-    void attemptErrorResponse(final long correlationId, final String errorMessage, final ControlResponseProxy proxy)
+    void sendDescriptor(final long correlationId, final UnsafeBuffer descriptorBuffer)
     {
-        proxy.sendResponse(controlSessionId, correlationId, GENERIC, ERROR, errorMessage, this);
+        assertCalledOnConductorThread();
+        if (!syncResponseQueue.isEmpty() ||
+            !controlResponseProxy.sendDescriptor(controlSessionId, correlationId, descriptorBuffer, this))
+        {
+            syncResponseQueue.offer(() -> controlResponseProxy.sendDescriptor(
+                controlSessionId, correlationId, descriptorBuffer, this));
+        }
     }
 
-    void attemptErrorResponse(
-        final long correlationId, final int errorCode, final String errorMessage, final ControlResponseProxy proxy)
+    void sendSubscriptionDescriptor(final long correlationId, final Subscription subscription)
     {
-        proxy.sendResponse(controlSessionId, correlationId, errorCode, ERROR, errorMessage, this);
-    }
-
-    int sendDescriptor(final long correlationId, final UnsafeBuffer descriptorBuffer, final ControlResponseProxy proxy)
-    {
-        return proxy.sendDescriptor(controlSessionId, correlationId, descriptorBuffer, this);
-    }
-
-    boolean sendSubscriptionDescriptor(
-        final long correlationId, final Subscription subscription, final ControlResponseProxy proxy)
-    {
-        return proxy.sendSubscriptionDescriptor(controlSessionId, correlationId, subscription, this);
+        assertCalledOnConductorThread();
+        if (!syncResponseQueue.isEmpty() ||
+            !controlResponseProxy.sendSubscriptionDescriptor(controlSessionId, correlationId, subscription, this))
+        {
+            syncResponseQueue.offer(() -> controlResponseProxy.sendSubscriptionDescriptor(
+                controlSessionId, correlationId, subscription, this));
+        }
     }
 
     void sendSignal(
@@ -699,6 +701,7 @@ final class ControlSession implements Session
         final long position,
         final RecordingSignal recordingSignal)
     {
+        assertCalledOnConductorThread();
         if (!syncResponseQueue.isEmpty() || !controlResponseProxy.sendSignal(
             controlSessionId,
             correlationId,
@@ -708,17 +711,14 @@ final class ControlSession implements Session
             recordingSignal,
             controlPublication))
         {
-            if (controlPublication.isConnected())
-            {
-                syncResponseQueue.offer(() -> controlResponseProxy.sendSignal(
-                    controlSessionId,
-                    correlationId,
-                    recordingId,
-                    subscriptionId,
-                    position,
-                    recordingSignal,
-                    controlPublication));
-            }
+            syncResponseQueue.offer(() -> controlResponseProxy.sendSignal(
+                controlSessionId,
+                correlationId,
+                recordingId,
+                subscriptionId,
+                position,
+                recordingSignal,
+                controlPublication));
         }
     }
 
@@ -742,6 +742,15 @@ final class ControlSession implements Session
     void reject()
     {
         state(State.REJECTED);
+    }
+
+    private void assertCalledOnConductorThread()
+    {
+        if (Thread.currentThread() != conductorThread)
+        {
+            throw new IllegalStateException(
+                "Invalid concurrent access detected: " + Thread.currentThread() + " != " + conductorThread);
+        }
     }
 
     private void queueResponse(

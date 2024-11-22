@@ -545,7 +545,7 @@ public abstract class Publication implements AutoCloseable
      *     }
      * }</pre>
      *
-     * @param length      of the range to claim, in bytes..
+     * @param length      of the range to claim, in bytes.
      * @param bufferClaim to be populated if the claim succeeds.
      * @return The new stream position, otherwise a negative error value of {@link #NOT_CONNECTED},
      * {@link #BACK_PRESSURED}, {@link #ADMIN_ACTION}, {@link #CLOSED}, or {@link #MAX_POSITION_EXCEEDED}.
@@ -586,6 +586,21 @@ public abstract class Publication implements AutoCloseable
     }
 
     /**
+     * Remove a previously added destination manually from a multi-destination-cast Publication.
+     *
+     * @param registrationId for the destination to remove.
+     */
+    public void removeDestination(final long registrationId)
+    {
+        if (isClosed)
+        {
+            throw new AeronException("Publication is closed");
+        }
+
+        conductor.removeDestination(originalRegistrationId, registrationId);
+    }
+
+    /**
      * Asynchronously add a destination manually to a multi-destination-cast Publication.
      * <p>
      * Errors will be delivered asynchronously to the {@link Aeron.Context#errorHandler()}. Completion can be
@@ -621,6 +636,25 @@ public abstract class Publication implements AutoCloseable
         }
 
         return conductor.asyncRemoveDestination(registrationId, endpointChannel);
+    }
+
+    /**
+     * Asynchronously remove a previously added destination from a multi-destination-cast Publication by registrationId.
+     * <p>
+     * Errors will be delivered asynchronously to the {@link Aeron.Context#errorHandler()}. Completion can be
+     * tracked by passing the returned correlation id to {@link Aeron#isCommandActive(long)}.
+     *
+     * @param destinationRegistrationId for the destination to remove.
+     * @return the correlationId for the command.
+     */
+    public long asyncRemoveDestination(final long destinationRegistrationId)
+    {
+        if (isClosed)
+        {
+            throw new AeronException("Publication is closed");
+        }
+
+        return conductor.asyncRemoveDestination(registrationId, destinationRegistrationId);
     }
 
     void internalClose()

@@ -480,6 +480,9 @@ int aeron_driver_conductor_on_add_send_destination(
 int aeron_driver_conductor_on_remove_send_destination(
     aeron_driver_conductor_t *conductor, aeron_destination_command_t *command);
 
+int aeron_driver_conductor_on_remove_receive_send_destination_by_id(
+    aeron_driver_conductor_t *conductor, aeron_destination_by_id_command_t *command);
+
 int aeron_driver_conductor_on_add_receive_ipc_destination(
     aeron_driver_conductor_t *conductor,
     aeron_destination_command_t *command);
@@ -519,6 +522,9 @@ int aeron_driver_conductor_on_client_close(aeron_driver_conductor_t *conductor, 
 int aeron_driver_conductor_on_terminate_driver(
     aeron_driver_conductor_t *conductor, aeron_terminate_driver_command_t *command);
 
+int aeron_driver_conductor_on_invalidate_image(
+    aeron_driver_conductor_t *conductor, aeron_reject_image_command_t *command);
+
 void aeron_driver_conductor_on_create_publication_image(void *clientd, void *item);
 
 void aeron_driver_conductor_on_re_resolve_endpoint(void *clientd, void *item);
@@ -531,13 +537,9 @@ void aeron_driver_conductor_on_response_setup(void *clientd, void *item);
 
 void aeron_driver_conductor_on_response_connected(void *clientd, void *item);
 
+void aeron_driver_conductor_on_publication_error(void *clientd, void *item);
+
 void aeron_driver_conductor_on_release_resource(void *clientd, void *item);
-
-aeron_send_channel_endpoint_t *aeron_driver_conductor_find_send_channel_endpoint_by_tag(
-    aeron_driver_conductor_t *conductor, int64_t channel_tag_id);
-
-aeron_receive_channel_endpoint_t *aeron_driver_conductor_find_receive_channel_endpoint_by_tag(
-    aeron_driver_conductor_t *conductor, int64_t channel_tag_id);
 
 inline bool aeron_driver_conductor_is_subscribable_linked(
     aeron_subscription_link_t *link, aeron_subscribable_t *subscribable)

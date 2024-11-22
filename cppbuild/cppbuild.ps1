@@ -31,7 +31,6 @@ $CmakeBuildParallelLevel = [Environment]::ProcessorCount
 $DeleteBuildDir = $true
 $BuildConfig = "Release"
 
-#foreach ($arg in $Args)
 for ($i = 0; $i -lt $Args.count; $i++)
 {
     $arg = $Args[$i]
@@ -57,6 +56,10 @@ for ($i = 0; $i -lt $Args.count; $i++)
     elseif ($arg -eq "--cxx-warnings-as-errors")
     {
         $CmakeExtraArgs = Add-Arg $CmakeExtraArgs "-DCXX_WARNINGS_AS_ERRORS=ON"
+    }
+    elseif ($arg -eq "--cxx-hide-deprecation-message")
+    {
+        $CmakeExtraArgs = Add-Arg $CmakeExtraArgs "-DAERON_HIDE_DEPRECATION_MESSAGE=ON"
     }
     elseif ($arg -eq "--link-samples-client-shared")
     {
@@ -164,7 +167,7 @@ try
         $client.DownloadFile("https://github.com/Kitware/CMake/releases/download/v$CMakeVersion/cmake-$CMakeVersion-windows-x86_64.zip", "$PSScriptRoot\cmake-$CMakeVersion-windows-x86_64.zip")
 
         Push-Location $PSScriptRoot
-        7z x "cmake-$CMakeVersion-windows-x86_64.zip"
+        Expand-Archive -LiteralPath "cmake-$CMakeVersion-windows-x86_64.zip" -DestinationPath "$PSScriptRoot"
         Remove-Item "cmake-$CMakeVersion-windows-x86_64.zip"
         Pop-Location
     }
@@ -203,4 +206,5 @@ finally
     Pop-Location
     $env:Path = $OldPath
 }
+
 

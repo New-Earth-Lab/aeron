@@ -572,7 +572,7 @@ class Election
 
         if (FOLLOWER_CATCHUP == state || FOLLOWER_REPLAY == state)
         {
-            final long nowNs = ctx.clusterClock().timeUnit().toNanos(timestamp);
+            final long nowNs = ctx.clusterClock().convertToNanos(timestamp);
             ensureRecordingLogCoherent(leadershipTermId, termBaseLogPosition, NULL_VALUE, nowNs);
             this.logPosition = logPosition;
             this.logLeadershipTermId = leadershipTermId;
@@ -648,27 +648,14 @@ class Election
     private int canvass(final long nowNs)
     {
         int workCount = 0;
+        final long deadlineNs = isExtendedCanvass ?
+            timeOfLastStateChangeNs + ctx.startupCanvassTimeoutNs() :
+            consensusModuleAgent.timeOfLastLeaderUpdateNs() + ctx.leaderHeartbeatTimeoutNs();
 
         if (hasUpdateIntervalExpired(nowNs, ctx.electionStatusIntervalNs()))
         {
             timeOfLastUpdateNs = nowNs;
-            for (final ClusterMember member : clusterMembers)
-            {
-                if (member.id() != thisMember.id())
-                {
-                    if (null == member.publication())
-                    {
-                        ClusterMember.tryAddPublication(
-                            member,
-                            ctx.consensusStreamId(),
-                            ctx.aeron(),
-                            ctx.countedErrorHandler());
-                    }
-
-                    consensusPublisher.canvassPosition(
-                        member.publication(), logLeadershipTermId, appendPosition, leadershipTermId, thisMember.id());
-                }
-            }
+            publishCanvassPosition();
 
             workCount++;
         }
@@ -677,10 +664,6 @@ class Election
         {
             return workCount;
         }
-
-        final long deadlineNs = isExtendedCanvass ?
-            timeOfLastStateChangeNs + ctx.startupCanvassTimeoutNs() :
-            consensusModuleAgent.timeOfLastLeaderUpdateNs() + ctx.leaderHeartbeatTimeoutNs();
 
         if (ClusterMember.isUnanimousCandidate(clusterMembers, thisMember, gracefulClosedLeaderId) ||
             (nowNs >= deadlineNs && ClusterMember.isQuorumCandidate(clusterMembers, thisMember)))
@@ -702,6 +685,14 @@ class Election
                 candidateTermId + 1, logPosition, ctx.epochClock().time());
             ClusterMember.becomeCandidate(clusterMembers, candidateTermId, thisMember.id());
             state(CANDIDATE_BALLOT, nowNs, "");
+
+            return 1;
+        }
+        else if (hasUpdateIntervalExpired(nowNs, ctx.electionStatusIntervalNs()))
+        {
+            timeOfLastUpdateNs = nowNs;
+            publishCanvassPosition();
+
             return 1;
         }
 
@@ -1152,6 +1143,27 @@ class Election
         return workCount;
     }
 
+    private void publishCanvassPosition()
+    {
+        for (final ClusterMember member : clusterMembers)
+        {
+            if (member.id() != thisMember.id())
+            {
+                if (null == member.publication())
+                {
+                    ClusterMember.tryAddPublication(
+                        member,
+                        ctx.consensusStreamId(),
+                        ctx.aeron(),
+                        ctx.countedErrorHandler());
+                }
+
+                consensusPublisher.canvassPosition(
+                    member.publication(), logLeadershipTermId, appendPosition, leadershipTermId, thisMember.id());
+            }
+        }
+    }
+
     private void publishNewLeadershipTerm(final long timestamp)
     {
         for (final ClusterMember member : clusterMembers)
@@ -1190,6 +1202,7 @@ class Election
                 timestamp,
                 thisMember.id(),
                 logSessionId,
+                ctx.appVersion(),
                 isLeaderStartup);
         }
     }

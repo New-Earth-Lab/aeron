@@ -27,7 +27,12 @@ import io.aeron.cluster.codecs.HeartbeatRequestDecoder;
 import io.aeron.cluster.codecs.MessageHeaderDecoder;
 import io.aeron.cluster.codecs.StandbySnapshotDecoder;
 import io.aeron.cluster.codecs.mark.ClusterComponentType;
-import io.aeron.cluster.service.*;
+import io.aeron.cluster.service.ClusterMarkFile;
+import io.aeron.cluster.service.ClusterCounters;
+import io.aeron.cluster.service.ClusteredServiceContainer;
+import io.aeron.cluster.service.ClusterClock;
+import io.aeron.cluster.service.SnapshotDurationTracker;
+
 import io.aeron.config.Config;
 import io.aeron.config.DefaultType;
 import io.aeron.driver.DutyCycleTracker;
@@ -50,23 +55,23 @@ import org.agrona.concurrent.status.CountersReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.charset.StandardCharsets;
 import java.util.Random;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 
 import static io.aeron.AeronCounters.*;
+import static io.aeron.ChannelUri.*;
 import static io.aeron.CommonContext.*;
 import static io.aeron.cluster.ConsensusModule.Configuration.CLUSTER_CLIENT_TIMEOUT_COUNT_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.CLUSTER_NODE_ROLE_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.COMMIT_POSITION_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.*;
-import static io.aeron.cluster.service.ClusteredServiceContainer.Configuration.*;
-import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.agrona.BitUtil.findNextPositivePowerOfTwo;
 import static org.agrona.SystemUtil.*;
 
@@ -254,10 +259,10 @@ public final class ConsensusModule implements AutoCloseable
         }
         catch (final Exception ex)
         {
-            if (null != ctx.markFile)
+            if (null != ctx.clusterMarkFile())
             {
-                ctx.markFile.signalFailedStart();
-                ctx.markFile.force();
+                ctx.clusterMarkFile().signalFailedStart();
+                ctx.clusterMarkFile().force();
             }
 
             CloseHelper.quietClose(ctx::close);
@@ -406,6 +411,8 @@ public final class ConsensusModule implements AutoCloseable
         /**
          * Property name for the identity of the appointed leader. This is when automated leader elections are
          * not employed.
+         * <p>
+         * This feature is for testing and not recommended for production usage.
          */
         @Config
         public static final String APPOINTED_LEADER_ID_PROP_NAME = "aeron.cluster.appointed.leader.id";
@@ -447,14 +454,18 @@ public final class ConsensusModule implements AutoCloseable
 
         /**
          * Property name for whether cluster member information in snapshots should be ignored on load or not.
+         * @deprecated Was used by the dynamic join.
          */
         @Config
+        @Deprecated(forRemoval = true, since = "1.47.0")
         public static final String CLUSTER_MEMBERS_IGNORE_SNAPSHOT_PROP_NAME = "aeron.cluster.members.ignore.snapshot";
 
         /**
          * Default property for whether cluster member information in snapshots should be ignored or not.
+         * @deprecated Was used by the dynamic join.
          */
         @Config
+        @Deprecated(forRemoval = true, since = "1.47.0")
         public static final String CLUSTER_MEMBERS_IGNORE_SNAPSHOT_DEFAULT = "false";
 
         /**
@@ -608,7 +619,7 @@ public final class ConsensusModule implements AutoCloseable
         /**
          * Type id of a recovery state counter.
          */
-        public static final int RECOVERY_STATE_TYPE_ID = RecoveryState.RECOVERY_STATE_TYPE_ID;
+        public static final int RECOVERY_STATE_TYPE_ID = AeronCounters.CLUSTER_RECOVERY_STATE_TYPE_ID;
 
         /**
          * Counter type id for count of snapshots taken.
@@ -991,6 +1002,8 @@ public final class ConsensusModule implements AutoCloseable
         /**
          * The value {@link #APPOINTED_LEADER_ID_DEFAULT} or system property
          * {@link #APPOINTED_LEADER_ID_PROP_NAME} if set.
+         * <p>
+         * This feature is for testing and not recommended for production usage.
          *
          * @return {@link #APPOINTED_LEADER_ID_DEFAULT} or system property
          * {@link #APPOINTED_LEADER_ID_PROP_NAME} if set.
@@ -1028,7 +1041,9 @@ public final class ConsensusModule implements AutoCloseable
          *
          * @return {@link #CLUSTER_MEMBERS_IGNORE_SNAPSHOT_DEFAULT} or system property
          * {@link #CLUSTER_MEMBERS_IGNORE_SNAPSHOT_PROP_NAME} it set.
+         * @deprecated Was used by the dynamic join.
          */
+        @Deprecated(forRemoval = true, since = "1.47.0")
         public static boolean clusterMembersIgnoreSnapshot()
         {
             return "true".equalsIgnoreCase(System.getProperty(
@@ -1074,7 +1089,8 @@ public final class ConsensusModule implements AutoCloseable
          */
         public static String snapshotChannel()
         {
-            return System.getProperty(SNAPSHOT_CHANNEL_PROP_NAME, SNAPSHOT_CHANNEL_DEFAULT);
+            return System.getProperty(
+                ClusteredServiceContainer.Configuration.SNAPSHOT_CHANNEL_PROP_NAME, SNAPSHOT_CHANNEL_DEFAULT);
         }
 
         /**
@@ -1086,7 +1102,8 @@ public final class ConsensusModule implements AutoCloseable
          */
         public static int snapshotStreamId()
         {
-            return Integer.getInteger(SNAPSHOT_STREAM_ID_PROP_NAME, SNAPSHOT_STREAM_ID_DEFAULT);
+            return Integer.getInteger(
+                ClusteredServiceContainer.Configuration.SNAPSHOT_STREAM_ID_PROP_NAME, SNAPSHOT_STREAM_ID_DEFAULT);
         }
 
         /**
@@ -1208,8 +1225,8 @@ public final class ConsensusModule implements AutoCloseable
          */
         public static long totalSnapshotDurationThresholdNs()
         {
-            return getDurationInNanos(TOTAL_SNAPSHOT_DURATION_THRESHOLD_PROP_NAME,
-                TOTAL_SNAPSHOT_DURATION_THRESHOLD_DEFAULT_NS);
+            return getDurationInNanos(
+                TOTAL_SNAPSHOT_DURATION_THRESHOLD_PROP_NAME, TOTAL_SNAPSHOT_DURATION_THRESHOLD_DEFAULT_NS);
         }
 
         /**
@@ -1467,13 +1484,20 @@ public final class ConsensusModule implements AutoCloseable
      */
     public static final class Context implements Cloneable
     {
-        /**
-         * Using an integer because there is no support for boolean. 1 is concluded, 0 is not concluded.
-         */
-        private static final AtomicIntegerFieldUpdater<Context> IS_CONCLUDED_UPDATER = newUpdater(
-            Context.class, "isConcluded");
-        private volatile int isConcluded;
+        private static final VarHandle IS_CONCLUDED_VH;
+        static
+        {
+            try
+            {
+                IS_CONCLUDED_VH = MethodHandles.lookup().findVarHandle(Context.class, "isConcluded", boolean.class);
+            }
+            catch (final ReflectiveOperationException ex)
+            {
+                throw new ExceptionInInitializerError(ex);
+            }
+        }
 
+        private volatile boolean isConcluded;
         private boolean ownsAeronClient = false;
         private String aeronDirectoryName = CommonContext.getAeronDirectoryName();
         private Aeron aeron;
@@ -1494,7 +1518,6 @@ public final class ConsensusModule implements AutoCloseable
         private int appointedLeaderId = Configuration.appointedLeaderId();
         private String clusterMembers = Configuration.clusterMembers();
         private String clusterConsensusEndpoints = Configuration.clusterConsensusEndpoints();
-        private boolean clusterMembersIgnoreSnapshot = Configuration.clusterMembersIgnoreSnapshot();
         private String ingressChannel = AeronCluster.Configuration.ingressChannel();
         private int ingressStreamId = AeronCluster.Configuration.ingressStreamId();
         private boolean isIpcIngressAllowed = Configuration.isIpcIngressAllowed();
@@ -1596,7 +1619,7 @@ public final class ConsensusModule implements AutoCloseable
         @SuppressWarnings("MethodLength")
         public void conclude()
         {
-            if (0 != IS_CONCLUDED_UPDATER.getAndSet(this, 1))
+            if ((boolean)IS_CONCLUDED_VH.getAndSet(this, true))
             {
                 throw new ConcurrentConcludeException();
             }
@@ -1689,7 +1712,7 @@ public final class ConsensusModule implements AutoCloseable
                     ClusterComponentType.CONSENSUS_MODULE,
                     errorBufferLength,
                     epochClock,
-                    LIVENESS_TIMEOUT_MS);
+                    ClusteredServiceContainer.Configuration.LIVENESS_TIMEOUT_MS);
             }
 
             MarkFile.ensureMarkFileLink(
@@ -1717,7 +1740,7 @@ public final class ConsensusModule implements AutoCloseable
 
             if (null == errorLog)
             {
-                errorLog = new DistinctErrorLog(markFile.errorBuffer(), epochClock, US_ASCII);
+                errorLog = new DistinctErrorLog(markFile.errorBuffer(), epochClock, StandardCharsets.US_ASCII);
             }
 
             errorHandler = CommonContext.setupErrorHandler(errorHandler, errorLog);
@@ -1942,7 +1965,9 @@ public final class ConsensusModule implements AutoCloseable
                 archiveContext = new AeronArchive.Context()
                     .controlRequestChannel(AeronArchive.Configuration.localControlChannel())
                     .controlResponseChannel(AeronArchive.Configuration.localControlChannel())
-                    .controlRequestStreamId(AeronArchive.Configuration.localControlStreamId());
+                    .controlRequestStreamId(AeronArchive.Configuration.localControlStreamId())
+                    .controlResponseStreamId(
+                        clusterId * 100 + 100 + AeronArchive.Configuration.controlResponseStreamId());
             }
 
             if (!archiveContext.controlRequestChannel().startsWith(CommonContext.IPC_CHANNEL))
@@ -1964,7 +1989,11 @@ public final class ConsensusModule implements AutoCloseable
                 .aeron(aeron)
                 .errorHandler(countedErrorHandler)
                 .ownsAeronClient(false)
-                .lock(NoOpLock.INSTANCE);
+                .lock(NoOpLock.INSTANCE)
+                .controlRequestChannel(addAliasIfAbsent(
+                archiveContext.controlRequestChannel(), "cm-archive-ctrl-req-cluster-" + clusterId))
+                .controlResponseChannel(addAliasIfAbsent(
+                archiveContext.controlResponseChannel(), "cm-archive-ctrl-resp-cluster-" + clusterId));
 
             if (null == shutdownSignalBarrier)
             {
@@ -2001,7 +2030,7 @@ public final class ConsensusModule implements AutoCloseable
                 egressPublisher = new EgressPublisher();
             }
 
-            final ChannelUri channelUri = ChannelUri.parse(logChannel());
+            final ChannelUri channelUri = parse(logChannel());
             isLogMdc = channelUri.isUdp() && null == channelUri.get(ENDPOINT_PARAM_NAME);
 
             if (null == consensusModuleExtension)
@@ -2029,7 +2058,7 @@ public final class ConsensusModule implements AutoCloseable
          */
         public boolean isConcluded()
         {
-            return 1 == isConcluded;
+            return isConcluded;
         }
 
         /**
@@ -2322,6 +2351,8 @@ public final class ConsensusModule implements AutoCloseable
          * The cluster member id of the appointed cluster leader.
          * <p>
          * -1 means no leader has been appointed and an automated leader election should occur.
+         * <p>
+         * This feature is for testing and not recommended for production usage.
          *
          * @param appointedLeaderId for the cluster.
          * @return this for a fluent API.
@@ -2387,7 +2418,6 @@ public final class ConsensusModule implements AutoCloseable
          * String representing the cluster members consensus endpoints used to request to join the cluster.
          * <p>
          * {@code "endpoint,endpoint,endpoint"}
-         * <p>
          *
          * @param endpoints which are to be contacted for joining the cluster.
          * @return this for a fluent API.
@@ -2423,10 +2453,11 @@ public final class ConsensusModule implements AutoCloseable
          * @param ignore or not the cluster members in the snapshot.
          * @return this for a fluent API.
          * @see Configuration#CLUSTER_MEMBERS_IGNORE_SNAPSHOT_PROP_NAME
+         * @deprecated Was used by the dynamic join.
          */
+        @Deprecated(forRemoval = true, since = "1.47.0")
         public Context clusterMembersIgnoreSnapshot(final boolean ignore)
         {
-            this.clusterMembersIgnoreSnapshot = ignore;
             return this;
         }
 
@@ -2435,11 +2466,13 @@ public final class ConsensusModule implements AutoCloseable
          *
          * @return ignore or not the cluster members in the snapshot.
          * @see Configuration#CLUSTER_MEMBERS_IGNORE_SNAPSHOT_PROP_NAME
+         * @deprecated Was used by the dynamic join.
          */
         @Config
+        @Deprecated(forRemoval = true, since = "1.47.0")
         public boolean clusterMembersIgnoreSnapshot()
         {
-            return clusterMembersIgnoreSnapshot;
+            return false;
         }
 
         /**
@@ -3587,7 +3620,7 @@ public final class ConsensusModule implements AutoCloseable
         }
 
         /**
-         * Get the counter for the current state of an election
+         * Get the counter for the current state of an election.
          *
          * @return the counter for the current state of an election.
          * @see ElectionState
@@ -4423,17 +4456,18 @@ public final class ConsensusModule implements AutoCloseable
 
         private void validateLogChannel()
         {
-            final ChannelUri logChannelUri = ChannelUri.parse(logChannel);
-            verifyNotPresent(logChannelUri, "logChannel", INITIAL_TERM_ID_PARAM_NAME);
-            verifyNotPresent(logChannelUri, "logChannel", TERM_ID_PARAM_NAME);
-            verifyNotPresent(logChannelUri, "logChannel", TERM_OFFSET_PARAM_NAME);
-        }
-
-        private static void verifyNotPresent(final ChannelUri channelUri, final String name, final String paramName)
-        {
-            if (channelUri.containsKey(paramName))
+            final ChannelUri logChannelUri = parse(logChannel);
+            if (logChannelUri.containsKey(INITIAL_TERM_ID_PARAM_NAME))
             {
-                throw new ConfigurationException(name + " must not contain: " + paramName);
+                throw new ConfigurationException("logChannel must not contain: " + INITIAL_TERM_ID_PARAM_NAME);
+            }
+            if (logChannelUri.containsKey(TERM_ID_PARAM_NAME))
+            {
+                throw new ConfigurationException("logChannel must not contain: " + TERM_ID_PARAM_NAME);
+            }
+            if (logChannelUri.containsKey(TERM_OFFSET_PARAM_NAME))
+            {
+                throw new ConfigurationException("logChannel must not contain: " + TERM_OFFSET_PARAM_NAME);
             }
         }
 
@@ -4460,7 +4494,6 @@ public final class ConsensusModule implements AutoCloseable
                 "\n    appointedLeaderId=" + appointedLeaderId +
                 "\n    clusterMembers='" + clusterMembers + '\'' +
                 "\n    clusterConsensusEndpoints='" + clusterConsensusEndpoints + '\'' +
-                "\n    clusterMembersIgnoreSnapshot=" + clusterMembersIgnoreSnapshot +
                 "\n    ingressChannel='" + ingressChannel + '\'' +
                 "\n    ingressStreamId=" + ingressStreamId +
                 "\n    ingressFragmentLimit=" + ingressFragmentLimit +

@@ -44,6 +44,9 @@ final class ClientCommandAdapter implements ControlledMessageHandler
     private final CounterMessageFlyweight counterMsgFlyweight = new CounterMessageFlyweight();
     private final StaticCounterMessageFlyweight staticCounterMessageFlyweight = new StaticCounterMessageFlyweight();
     private final TerminateDriverFlyweight terminateDriverFlyweight = new TerminateDriverFlyweight();
+    private final RejectImageFlyweight rejectImageFlyweight = new RejectImageFlyweight();
+    private final DestinationByIdMessageFlyweight destinationByIdMessageFlyweight =
+        new DestinationByIdMessageFlyweight();
     private final DriverConductor conductor;
     private final RingBuffer toDriverCommands;
     private final ClientProxy clientProxy;
@@ -282,6 +285,34 @@ final class ClientCommandAdapter implements ControlledMessageHandler
                         staticCounterMessageFlyweight.registrationId(),
                         correlationId,
                         clientId);
+                    break;
+                }
+
+                case REJECT_IMAGE:
+                {
+                    rejectImageFlyweight.wrap(buffer, index);
+                    rejectImageFlyweight.validateLength(msgTypeId, length);
+                    correlationId = rejectImageFlyweight.correlationId();
+
+                    conductor.onRejectImage(
+                        rejectImageFlyweight.correlationId(),
+                        rejectImageFlyweight.imageCorrelationId(),
+                        rejectImageFlyweight.position(),
+                        rejectImageFlyweight.reason());
+                    break;
+                }
+
+                case REMOVE_DESTINATION_BY_ID:
+                {
+                    destinationByIdMessageFlyweight.wrap(buffer, index);
+                    destinationByIdMessageFlyweight.validateLength(msgTypeId, length);
+
+                    correlationId = destinationByIdMessageFlyweight.correlationId();
+                    conductor.onRemoveSendDestination(
+                        destinationByIdMessageFlyweight.resourceRegistrationId(),
+                        destinationByIdMessageFlyweight.destinationRegistrationId(),
+                        destinationByIdMessageFlyweight.correlationId());
+
                     break;
                 }
 

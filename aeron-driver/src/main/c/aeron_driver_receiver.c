@@ -166,7 +166,7 @@ int aeron_driver_receiver_do_work(void *clientd)
         aeron_driver_receiver_log_error(receiver);
     }
 
-    work_count += bytes_received > 0 ? (int)bytes_received : 0;
+    work_count += (int)bytes_received;
 
     aeron_counter_add_ordered(receiver->total_bytes_received_counter, bytes_received);
 
@@ -176,32 +176,38 @@ int aeron_driver_receiver_do_work(void *clientd)
 
         if (NULL != image->endpoint)
         {
-            int send_sm_result = aeron_publication_image_send_pending_status_message(image, now_ns);
-            if (send_sm_result < 0)
+            int send_result = aeron_publication_image_send_pending_status_message(image, now_ns);
+            if (send_result < 0)
             {
                 AERON_APPEND_ERR("%s", "receiver send SM");
                 aeron_driver_receiver_log_error(receiver);
             }
+            else
+            {
+                work_count += send_result;
+            }
 
-            work_count += send_sm_result < 0 ? 0 : send_sm_result;
-
-            int send_nak_result = aeron_publication_image_send_pending_loss(image);
-            if (send_nak_result < 0)
+            send_result = aeron_publication_image_send_pending_loss(image);
+            if (send_result < 0)
             {
                 AERON_APPEND_ERR("%s", "receiver send NAK");
                 aeron_driver_receiver_log_error(receiver);
             }
+            else
+            {
+                work_count += send_result;
+            }
 
-            work_count += send_nak_result < 0 ? 0 : send_nak_result;
-
-            int initiate_rttm_result = aeron_publication_image_initiate_rttm(image, now_ns);
-            if (send_nak_result < 0)
+            send_result = aeron_publication_image_initiate_rttm(image, now_ns);
+            if (send_result < 0)
             {
                 AERON_APPEND_ERR("%s", "receiver send RTTM");
                 aeron_driver_receiver_log_error(receiver);
             }
-
-            work_count += initiate_rttm_result < 0 ? 0 : initiate_rttm_result;
+            else
+            {
+                work_count += send_result;
+            }
         }
     }
 
@@ -502,6 +508,22 @@ void aeron_driver_receiver_on_remove_destination(void *clientd, void *item)
     }
 }
 
+void aeron_driver_receiver_disconnect_inactive_image(
+    aeron_driver_receiver_t *receiver,
+    const aeron_receive_channel_endpoint_t *endpoint,
+    const int32_t stream_id,
+    const int32_t session_id)
+{
+    for (size_t i = 0, length = receiver->images.length; i < length; i++)
+    {
+        aeron_publication_image_t *image = receiver->images.array[i].image;
+        if (endpoint == image->endpoint && stream_id == image->stream_id && session_id == image->session_id)
+        {
+            aeron_publication_image_stop_status_messages_if_not_active(image);
+        }
+    }
+}
+
 void aeron_driver_receiver_on_add_publication_image(void *clientd, void *item)
 {
     aeron_driver_receiver_t *receiver = (aeron_driver_receiver_t *)clientd;
@@ -519,6 +541,7 @@ void aeron_driver_receiver_on_add_publication_image(void *clientd, void *item)
     }
     else
     {
+        aeron_driver_receiver_disconnect_inactive_image(receiver, image->endpoint, image->stream_id, image->session_id);
         receiver->images.array[receiver->images.length++].image = cmd->image;
     }
 }
@@ -580,6 +603,26 @@ void aeron_driver_receiver_on_resolution_change(void *clientd, void *item)
     }
 
     aeron_receive_channel_endpoint_update_control_address(endpoint, destination, &cmd->new_addr);
+}
+
+void aeron_driver_receiver_on_invalidate_image(void *clientd, void *item)
+{
+    aeron_driver_receiver_t *receiver = clientd;
+    aeron_command_receiver_invalidate_image_t *cmd = item;
+    const int64_t correlation_id = cmd->image_correlation_id;
+    const int32_t reason_length = cmd->reason_length;
+    const char *reason = (const char *)cmd->reason_text;
+
+    for (size_t i = 0, size = receiver->images.length; i < size; i++)
+    {
+        aeron_publication_image_t *image = receiver->images.array[i].image;
+        // TODO: Should we pass the pointer to the image here instead of the correlation_id.
+        if (correlation_id == aeron_publication_image_registration_id(image))
+        {
+            aeron_publication_image_invalidate(image, reason_length, reason);
+            break;
+        }
+    }
 }
 
 int aeron_driver_receiver_add_pending_setup(

@@ -351,7 +351,7 @@ int aeron_async_add_publication_poll(aeron_publication_t **publication, aeron_as
     *publication = NULL;
 
     aeron_client_registration_status_t registration_status;
-    AERON_GET_VOLATILE(registration_status, async->registration_status);
+    AERON_GET_ACQUIRE(registration_status, async->registration_status);
 
     switch (registration_status)
     {
@@ -419,7 +419,7 @@ int aeron_async_add_exclusive_publication_poll(
     *publication = NULL;
 
     aeron_client_registration_status_t registration_status;
-    AERON_GET_VOLATILE(registration_status, async->registration_status);
+    AERON_GET_ACQUIRE(registration_status, async->registration_status);
 
     switch (registration_status)
     {
@@ -519,7 +519,7 @@ int aeron_async_add_subscription_poll(aeron_subscription_t **subscription, aeron
     *subscription = NULL;
 
     aeron_client_registration_status_t registration_status;
-    AERON_GET_VOLATILE(registration_status, async->registration_status);
+    AERON_GET_ACQUIRE(registration_status, async->registration_status);
 
     switch (registration_status)
     {
@@ -616,7 +616,7 @@ int aeron_async_add_counter_poll(aeron_counter_t **counter, aeron_async_add_coun
     *counter = NULL;
 
     aeron_client_registration_status_t registration_status;
-    AERON_GET_VOLATILE(registration_status, async->registration_status);
+    AERON_GET_ACQUIRE(registration_status, async->registration_status);
 
     switch (registration_status)
     {
@@ -712,7 +712,7 @@ static int aeron_async_destination_poll(aeron_async_destination_t *async)
     }
 
     aeron_client_registration_status_t registration_status;
-    AERON_GET_VOLATILE(registration_status, async->registration_status);
+    AERON_GET_ACQUIRE(registration_status, async->registration_status);
 
     switch (registration_status)
     {
@@ -797,6 +797,28 @@ int aeron_publication_async_remove_destination(
     }
 
     return aeron_client_conductor_async_remove_publication_destination(async, &client->conductor, publication, uri);
+}
+
+int aeron_publication_async_remove_destination_by_id(
+    aeron_async_destination_t **async,
+    aeron_t *client,
+    aeron_publication_t *publication,
+    int64_t destination_registration_id)
+{
+    if (NULL == async || NULL == client || NULL == publication)
+    {
+        AERON_SET_ERR(
+            EINVAL,
+            "Parameters must not be null, async: %s, client: %s, publication: %s, destination_registration_id: %" PRId64,
+            AERON_NULL_STR(async),
+            AERON_NULL_STR(client),
+            AERON_NULL_STR(publication),
+            destination_registration_id);
+        return -1;
+    }
+
+    return aeron_client_conductor_async_remove_publication_destination_by_id(
+        async, &client->conductor, publication, destination_registration_id);
 }
 
 int aeron_subscription_async_add_destination(
@@ -892,6 +914,28 @@ int aeron_exclusive_publication_async_remove_destination(
         async, &client->conductor, publication, uri);
 }
 
+int aeron_exclusive_publication_async_remove_destination_by_id(
+    aeron_async_destination_t **async,
+    aeron_t *client,
+    aeron_exclusive_publication_t *publication,
+    int64_t destination_registration_id)
+{
+    if (NULL == async || NULL == client || NULL == publication)
+    {
+        AERON_SET_ERR(
+            EINVAL,
+            "Parameters must not be null, async: %s, client: %s, publication: %s, destination_registration_id: %" PRId64,
+            AERON_NULL_STR(async),
+            AERON_NULL_STR(client),
+            AERON_NULL_STR(publication),
+            destination_registration_id);
+        return -1;
+    }
+
+    return aeron_client_conductor_async_remove_exclusive_publication_destination_by_id(
+        async, &client->conductor, publication, destination_registration_id);
+}
+
 int aeron_client_handler_cmd_await_processed(aeron_client_handler_cmd_t *cmd, uint64_t timeout_ms)
 {
     bool processed = cmd->processed;
@@ -906,7 +950,7 @@ int aeron_client_handler_cmd_await_processed(aeron_client_handler_cmd_t *cmd, ui
         }
 
         sched_yield();
-        AERON_GET_VOLATILE(processed, cmd->processed);
+        AERON_GET_ACQUIRE(processed, cmd->processed);
     }
 
     return 0;

@@ -119,7 +119,7 @@ inline int64_t aeron_subscription_last_image_list_change_number(aeron_subscripti
 {
     int64_t last_image_list_change_number;
 
-    AERON_GET_VOLATILE(last_image_list_change_number, subscription->last_image_list_change_number);
+    AERON_GET_ACQUIRE(last_image_list_change_number, subscription->last_image_list_change_number);
 
     return last_image_list_change_number;
 }
@@ -129,8 +129,11 @@ inline void aeron_subscription_propose_last_image_change_number(
 {
     if (change_number > subscription->last_image_list_change_number)
     {
-        AERON_PUT_ORDERED(subscription->last_image_list_change_number, change_number);
+        AERON_SET_RELEASE(subscription->last_image_list_change_number, change_number);
     }
 }
+
+int aeron_subscription_reject_image(
+    aeron_subscription_t *subscription, int64_t image_correlation_id, int64_t position, const char *reason);
 
 #endif //AERON_C_SUBSCRIPTION_H

@@ -81,7 +81,6 @@ class ReplicationSession implements Session, RecordingDescriptorConsumer
     private final CachedEpochClock epochClock;
     private final ArchiveConductor conductor;
     private final ControlSession controlSession;
-    private final ControlResponseProxy controlResponseProxy;
     private final Catalog catalog;
     private final int fileIoMaxLength;
     private final Aeron aeron;
@@ -95,7 +94,6 @@ class ReplicationSession implements Session, RecordingDescriptorConsumer
     private long responsePublicationRegistrationId = NULL_VALUE;
     private ExclusivePublication responsePublication = null;
     private ArchiveProxy responseArchiveProxy = null;
-
 
     ReplicationSession(
         final long srcRecordingId,
@@ -112,7 +110,6 @@ class ReplicationSession implements Session, RecordingDescriptorConsumer
         final AeronArchive.Context context,
         final CachedEpochClock epochClock,
         final Catalog catalog,
-        final ControlResponseProxy controlResponseProxy,
         final ControlSession controlSession)
     {
         this.replicationId = replicationId;
@@ -125,7 +122,6 @@ class ReplicationSession implements Session, RecordingDescriptorConsumer
         this.aeron = context.aeron();
         this.context = context;
         this.catalog = catalog;
-        this.controlResponseProxy = controlResponseProxy;
         this.epochClock = epochClock;
         this.conductor = controlSession.archiveConductor();
         this.controlSession = controlSession;
@@ -892,10 +888,7 @@ class ReplicationSession implements Session, RecordingDescriptorConsumer
 
     private void error(final String msg, final int errorCode)
     {
-        if (controlSession.controlPublication().isConnected())
-        {
-            controlSession.sendErrorResponse(replicationId, errorCode, msg, controlResponseProxy);
-        }
+        controlSession.sendErrorResponse(replicationId, errorCode, msg);
     }
 
     private void signal(final long position, final RecordingSignal recordingSignal)

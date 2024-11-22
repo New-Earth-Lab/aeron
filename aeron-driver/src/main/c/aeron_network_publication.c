@@ -40,11 +40,12 @@ struct mmsghdr
 };
 #endif
 
-static inline void aeron_network_publication_liveness_on_remote_close(
+static inline bool aeron_network_publication_liveness_on_remote_close(
     aeron_network_publication_t *publication,
     int64_t receiver_id)
 {
-    aeron_int64_counter_map_remove(&publication->receiver_liveness_tracker, receiver_id);
+    int64_t missing_value = publication->receiver_liveness_tracker.initial_value;
+    return missing_value != aeron_int64_counter_map_remove(&publication->receiver_liveness_tracker, receiver_id);
 }
 
 static inline int aeron_network_publication_liveness_on_status_message(
@@ -90,10 +91,10 @@ static void aeron_network_publication_update_has_receivers(
     const bool is_live = 0 != publication->receiver_liveness_tracker.size;
 
     bool has_receivers;
-    AERON_GET_VOLATILE(has_receivers, publication->has_receivers);
+    AERON_GET_ACQUIRE(has_receivers, publication->has_receivers);
     if (is_live != has_receivers)
     {
-        AERON_PUT_ORDERED(publication->has_receivers, is_live);
+        AERON_SET_RELEASE(publication->has_receivers, is_live);
     }
 }
 
@@ -311,7 +312,7 @@ int aeron_network_publication_create(
     _pub->is_response = AERON_UDP_CHANNEL_CONTROL_MODE_RESPONSE == endpoint->conductor_fields.udp_channel->control_mode;
     _pub->response_correlation_id = params->response_correlation_id;
 
-    aeron_int64_counter_map_init(&_pub->receiver_liveness_tracker, AERON_NULL_VALUE, 16, 0.6);
+    aeron_int64_counter_map_init(&_pub->receiver_liveness_tracker, AERON_NULL_VALUE, 16, 0.6f);
 
     *publication = _pub;
 
@@ -606,7 +607,7 @@ int aeron_network_publication_send(aeron_network_publication_t *publication, int
     if (0 == bytes_sent)
     {
         bool is_end_of_stream;
-        AERON_GET_VOLATILE(is_end_of_stream, publication->is_end_of_stream);
+        AERON_GET_ACQUIRE(is_end_of_stream, publication->is_end_of_stream);
 
         bytes_sent = aeron_network_publication_heartbeat_message_check(
             publication, now_ns, active_term_id, term_offset, publication->signal_eos && is_end_of_stream);
@@ -616,7 +617,7 @@ int aeron_network_publication_send(aeron_network_publication_t *publication, int
         }
 
         bool has_spies;
-        AERON_GET_VOLATILE(has_spies, publication->has_spies);
+        AERON_GET_ACQUIRE(has_spies, publication->has_spies);
 
         if (publication->spies_simulate_connection && has_spies && !publication->has_receivers)
         {
@@ -750,7 +751,7 @@ int aeron_network_publication_on_nak(
 inline static bool aeron_network_publication_has_required_receivers(aeron_network_publication_t *publication)
 {
     bool has_receivers;
-    AERON_GET_VOLATILE(has_receivers, publication->has_receivers);
+    AERON_GET_ACQUIRE(has_receivers, publication->has_receivers);
 
     return has_receivers && publication->flow_control->has_required_receivers(publication->flow_control);
 }
@@ -760,12 +761,12 @@ inline static void aeron_network_publication_update_connected_status(
     bool expected_status)
 {
     bool is_connected;
-    AERON_GET_VOLATILE(is_connected, publication->is_connected);
+    AERON_GET_ACQUIRE(is_connected, publication->is_connected);
 
     if (is_connected != expected_status)
     {
-        AERON_PUT_ORDERED(publication->log_meta_data->is_connected, expected_status);
-        AERON_PUT_ORDERED(publication->is_connected, expected_status);
+        AERON_SET_RELEASE(publication->log_meta_data->is_connected, expected_status);
+        AERON_SET_RELEASE(publication->is_connected, expected_status);
     }
 }
 
@@ -787,7 +788,7 @@ void aeron_network_publication_on_status_message(
 
         if (aeron_send_channel_is_unicast(publication->endpoint))
         {
-            AERON_PUT_VOLATILE(publication->has_received_unicast_eos, true);
+            AERON_SET_RELEASE(publication->has_received_unicast_eos, true);
         }
     }
     else
@@ -797,7 +798,7 @@ void aeron_network_publication_on_status_message(
 
     const bool is_live = 0 != publication->receiver_liveness_tracker.size;
     bool existing_has_receivers;
-    AERON_GET_VOLATILE(existing_has_receivers, publication->has_receivers);
+    AERON_GET_ACQUIRE(existing_has_receivers, publication->has_receivers);
 
     if (!existing_has_receivers && is_live)
     {
@@ -806,7 +807,7 @@ void aeron_network_publication_on_status_message(
 
     if (existing_has_receivers != is_live)
     {
-        AERON_PUT_ORDERED(publication->has_receivers, is_live);
+        AERON_SET_RELEASE(publication->has_receivers, is_live);
     }
 
     if (!publication->has_initial_connection)
@@ -829,6 +830,36 @@ void aeron_network_publication_on_status_message(
     aeron_network_publication_update_connected_status(
         publication,
         aeron_network_publication_has_required_receivers(publication));
+}
+
+void aeron_network_publication_on_error(
+    aeron_network_publication_t *publication,
+    int64_t destination_registration_id,
+    const uint8_t *buffer,
+    size_t length,
+    struct sockaddr_storage *src_address,
+    aeron_driver_conductor_proxy_t *conductor_proxy)
+{
+    aeron_error_t *error = (aeron_error_t *)buffer;
+    const uint8_t *error_text = (const uint8_t *)(error + 1);
+    const int64_t time_ns = aeron_clock_cached_nano_time(publication->cached_clock);
+    publication->flow_control->on_error(publication->flow_control->state, buffer, length, src_address, time_ns);
+    if (aeron_network_publication_liveness_on_remote_close(publication, error->receiver_id))
+    {
+        const int64_t registration_id = aeron_network_publication_registration_id(publication);
+        aeron_driver_conductor_proxy_on_publication_error(
+            conductor_proxy,
+            registration_id,
+            destination_registration_id,
+            error->session_id,
+            error->stream_id,
+            error->receiver_id,
+            AERON_ERROR_HAS_GROUP_TAG_FLAG & error->frame_header.flags ? error->group_tag : AERON_NULL_VALUE,
+            src_address,
+            error->error_code,
+            error->error_length,
+            error_text);
+    }
 }
 
 void aeron_network_publication_on_rttm(
@@ -884,7 +915,7 @@ void aeron_network_publication_clean_buffer(aeron_network_publication_t *publica
             length - sizeof(int64_t));
 
         uint64_t *ptr = (uint64_t *)(publication->mapped_raw_log.term_buffers[dirty_index].addr + term_offset);
-        AERON_PUT_ORDERED(*ptr, (uint64_t)0);
+        AERON_SET_RELEASE(*ptr, (uint64_t)0);
 
         publication->conductor_fields.clean_position = clean_position + (int64_t)length;
     }
@@ -985,11 +1016,11 @@ void aeron_network_publication_decref(void *clientd)
             publication->cached_clock);
 
         aeron_counter_set_ordered(publication->pub_lmt_position.value_addr, producer_position);
-        AERON_PUT_ORDERED(publication->log_meta_data->end_of_stream_position, producer_position);
+        AERON_SET_RELEASE(publication->log_meta_data->end_of_stream_position, producer_position);
 
         if (aeron_counter_get_volatile(publication->snd_pos_position.value_addr) >= producer_position)
         {
-            AERON_PUT_ORDERED(publication->is_end_of_stream, true);
+            AERON_SET_RELEASE(publication->is_end_of_stream, true);
         }
     }
 }
@@ -1012,7 +1043,7 @@ bool aeron_network_publication_spies_finished_consuming(
             }
         }
 
-        AERON_PUT_ORDERED(publication->has_spies, false);
+        AERON_SET_RELEASE(publication->has_spies, false);
         aeron_driver_conductor_cleanup_spies(conductor, publication);
 
         for (size_t i = 0, length = publication->conductor_fields.subscribable.length; i < length; i++)
@@ -1174,7 +1205,7 @@ void aeron_network_publication_on_time_event(
                 }
 
                 bool has_receivers;
-                AERON_GET_VOLATILE(has_receivers, publication->has_receivers);
+                AERON_GET_ACQUIRE(has_receivers, publication->has_receivers);
                 if (has_receivers)
                 {
                     break;
@@ -1182,7 +1213,7 @@ void aeron_network_publication_on_time_event(
             }
             else
             {
-                AERON_PUT_ORDERED(publication->is_end_of_stream, true);
+                AERON_SET_RELEASE(publication->is_end_of_stream, true);
             }
 
             if (aeron_network_publication_spies_finished_consuming(publication, conductor, producer_position))
@@ -1196,7 +1227,7 @@ void aeron_network_publication_on_time_event(
         case AERON_NETWORK_PUBLICATION_STATE_LINGER:
         {
             bool has_received_unicast_eos = false;
-            AERON_GET_VOLATILE(has_received_unicast_eos, publication->has_received_unicast_eos);
+            AERON_GET_ACQUIRE(has_received_unicast_eos, publication->has_received_unicast_eos);
 
             if (has_received_unicast_eos ||
                 now_ns > (publication->conductor_fields.time_of_last_activity_ns + publication->linger_timeout_ns))
@@ -1233,3 +1264,5 @@ extern bool aeron_network_publication_has_sender_released(aeron_network_publicat
 extern int64_t aeron_network_publication_max_spy_position(aeron_network_publication_t *publication, int64_t snd_pos);
 
 extern bool aeron_network_publication_is_accepting_subscriptions(aeron_network_publication_t *publication);
+
+extern inline int64_t aeron_network_publication_registration_id(aeron_network_publication_t *publication);

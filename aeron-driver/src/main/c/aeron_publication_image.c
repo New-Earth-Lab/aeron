@@ -51,7 +51,7 @@ static void aeron_update_active_transport_count(aeron_publication_image_t *image
 
     if (active_transport_count != image->log_meta_data->active_transport_count)
     {
-        AERON_PUT_ORDERED(image->log_meta_data->active_transport_count, active_transport_count);
+        AERON_SET_RELEASE(image->log_meta_data->active_transport_count, active_transport_count);
     }
 }
 
@@ -59,7 +59,7 @@ static bool aeron_publication_image_check_and_get_response_session_id(
     aeron_publication_image_t *image, int32_t *response_session_id)
 {
     int64_t _response_session_id;
-    AERON_GET_VOLATILE(_response_session_id, image->response_session_id);
+    AERON_GET_ACQUIRE(_response_session_id, image->response_session_id);
     *response_session_id = (int32_t)_response_session_id;
     return ((int64_t)INT32_MIN) <= _response_session_id && _response_session_id <= ((int64_t)INT32_MAX);
 }
@@ -273,6 +273,7 @@ int aeron_publication_image_create(
     _image->is_sending_eos_sm = false;
     _image->has_receiver_released = false;
     _image->sm_timeout_ns = (int64_t)context->status_message_timeout_ns;
+    _image->invalidation_reason = NULL;
 
     memcpy(&_image->source_address, source_address, sizeof(_image->source_address));
     const int source_identity_length = aeron_format_source_identity(
@@ -317,7 +318,8 @@ int aeron_publication_image_create(
     _image->last_sm_position = initial_position;
     _image->last_overrun_threshold = initial_position + (term_buffer_length / 2);
     _image->time_of_last_packet_ns = now_ns;
-    _image->time_of_last_sm_ns = 0;
+    _image->next_sm_deadline_ns = 0;
+    _image->is_sm_enabled = true;
     _image->conductor_fields.clean_position = initial_position;
     _image->conductor_fields.time_of_last_state_change_ns = now_ns;
 
@@ -374,6 +376,7 @@ bool aeron_publication_image_free(aeron_publication_image_t *image)
     aeron_counter_add_ordered(image->mapped_bytes_counter, -((int64_t)image->mapped_raw_log.mapped_file.length));
 
     aeron_free(image->log_file_name);
+    aeron_free((void *)image->invalidation_reason);
     aeron_free(image);
 
     return true;
@@ -397,7 +400,7 @@ void aeron_publication_image_clean_buffer_to(aeron_publication_image_t *image, i
             length - sizeof(int64_t));
 
         uint64_t *ptr = (uint64_t *)(image->mapped_raw_log.term_buffers[dirty_index].addr + term_offset);
-        AERON_PUT_ORDERED(*ptr, (uint64_t)0);
+        AERON_SET_RELEASE(*ptr, (uint64_t)0);
 
         image->conductor_fields.clean_position = clean_position + (int64_t)length;
     }
@@ -409,14 +412,14 @@ void aeron_publication_image_on_gap_detected(void *clientd, int32_t term_id, int
     aeron_publication_image_t *image = (aeron_publication_image_t *)clientd;
     const int64_t change_number = image->begin_loss_change + 1;
 
-    AERON_PUT_ORDERED(image->begin_loss_change, change_number);
+    AERON_SET_RELEASE(image->begin_loss_change, change_number);
     aeron_release();
 
     image->loss_term_id = term_id;
     image->loss_term_offset = term_offset;
     image->loss_length = length;
 
-    AERON_PUT_ORDERED(image->end_loss_change, change_number);
+    AERON_SET_RELEASE(image->end_loss_change, change_number);
 
     if (image->loss_reporter_offset >= 0)
     {
@@ -620,6 +623,11 @@ int aeron_publication_image_insert_packet(
         return 0;
     }
 
+    if (NULL != image->invalidation_reason)
+    {
+        return 0;
+    }
+
     const bool is_heartbeat = aeron_publication_image_is_heartbeat(buffer, length);
     const int64_t packet_position = aeron_logbuffer_compute_position(
         term_id, term_offset, image->position_bits_to_shift, image->initial_term_id);
@@ -637,7 +645,7 @@ int aeron_publication_image_insert_packet(
             if (packet_position >= publication_window_bottom)
             {
                 aeron_publication_image_track_connection(image, destination, addr, now_ns);
-                AERON_PUT_ORDERED(image->time_of_last_packet_ns, now_ns);
+                AERON_SET_RELEASE(image->time_of_last_packet_ns, now_ns);
 
                 const bool is_eos = aeron_publication_image_is_end_of_stream(buffer, length);
                 if (is_eos && !image->is_end_of_stream)
@@ -645,8 +653,8 @@ int aeron_publication_image_insert_packet(
                     if (aeron_publication_image_all_eos(image, destination, packet_position))
                     {
                         const int64_t eos_position = aeron_publication_find_eos_position(image);
-                        AERON_PUT_ORDERED(image->log_meta_data->end_of_stream_position, eos_position);
-                        AERON_PUT_ORDERED(image->is_end_of_stream, true);
+                        AERON_SET_RELEASE(image->log_meta_data->end_of_stream_position, eos_position);
+                        AERON_SET_RELEASE(image->is_end_of_stream, true);
                     }
                 }
 
@@ -661,7 +669,7 @@ int aeron_publication_image_insert_packet(
         else if (!aeron_publication_image_is_flow_control_under_run(image, packet_position))
         {
             aeron_publication_image_track_connection(image, destination, addr, now_ns);
-            AERON_PUT_ORDERED(image->time_of_last_packet_ns, now_ns);
+            AERON_SET_RELEASE(image->time_of_last_packet_ns, now_ns);
 
             const size_t index = aeron_logbuffer_index_by_position(packet_position, image->position_bits_to_shift);
             uint8_t *term_buffer = image->mapped_raw_log.term_buffers[index].addr;
@@ -695,10 +703,33 @@ int aeron_publication_image_send_pending_status_message(aeron_publication_image_
 {
     int work_count = 0;
     int64_t change_number;
-    int32_t response_session_id = 0;
-    AERON_GET_VOLATILE(change_number, image->end_sm_change);
-    const bool has_sm_timed_out = now_ns > (image->time_of_last_sm_ns + image->sm_timeout_ns);
+    AERON_GET_ACQUIRE(change_number, image->end_sm_change);
+    const bool has_sm_timed_out = image->is_sm_enabled && image->next_sm_deadline_ns < now_ns;
 
+    if (NULL != image->invalidation_reason)
+    {
+        if (has_sm_timed_out)
+        {
+            for (size_t i = 0, len = image->connections.length; i < len; i++)
+            {
+                aeron_publication_image_connection_t *connection = &image->connections.array[i];
+                aeron_receiver_channel_endpoint_send_error_frame(
+                    image->endpoint,
+                    connection->destination,
+                    connection->control_addr,
+                    image->session_id,
+                    image->stream_id,
+                    AERON_ERROR_CODE_GENERIC_ERROR,
+                    image->invalidation_reason);
+            }
+
+            image->next_sm_deadline_ns = now_ns + image->sm_timeout_ns;
+        }
+
+        return 0;
+    }
+
+    int32_t response_session_id = 0;
     if (has_sm_timed_out && aeron_publication_image_check_and_get_response_session_id(image, &response_session_id))
     {
         for (size_t i = 0, len = image->connections.length; i < len; i++)
@@ -738,13 +769,16 @@ int aeron_publication_image_send_pending_status_message(aeron_publication_image_
 
         aeron_acquire();
 
-        if (change_number == image->begin_sm_change)
+        int64_t begin_change_number;
+        AERON_GET_ACQUIRE(begin_change_number, image->begin_sm_change);
+
+        if (change_number == begin_change_number)
         {
             const int32_t term_id = aeron_logbuffer_compute_term_id_from_position(
                 sm_position, image->position_bits_to_shift, image->initial_term_id);
             const int32_t term_offset = (int32_t)(sm_position & image->term_length_mask);
             bool is_sending_eos_sm;
-            AERON_GET_VOLATILE(is_sending_eos_sm, image->is_sending_eos_sm);
+            AERON_GET_ACQUIRE(is_sending_eos_sm, image->is_sending_eos_sm);
             const uint8_t flags = is_sending_eos_sm ? AERON_STATUS_MESSAGE_HEADER_EOS_FLAG : 0;
 
             for (size_t i = 0, len = image->connections.length; i < len; i++)
@@ -779,7 +813,7 @@ int aeron_publication_image_send_pending_status_message(aeron_publication_image_
             image->last_sm_position = sm_position;
             image->last_overrun_threshold = sm_position + (image->term_length / 2);
             image->last_sm_change_number = change_number;
-            image->time_of_last_sm_ns = now_ns;
+            image->next_sm_deadline_ns = now_ns + image->sm_timeout_ns;
 
             aeron_update_active_transport_count(image, now_ns);
         }
@@ -794,17 +828,20 @@ int aeron_publication_image_send_pending_loss(aeron_publication_image_t *image)
     int work_count = 0;
 
     int64_t change_number;
-    AERON_GET_VOLATILE(change_number, image->end_loss_change);
+    AERON_GET_ACQUIRE(change_number, image->end_loss_change);
 
     if (change_number != image->last_loss_change_number)
     {
         const int32_t term_id = image->loss_term_id;
         const int32_t term_offset = image->loss_term_offset;
-        const int32_t length = (int32_t)image->loss_length;
+        const size_t length = image->loss_length;
 
         aeron_acquire();
 
-        if (change_number == image->begin_loss_change)
+        int64_t begin_change_number;
+        AERON_GET_ACQUIRE(begin_change_number, image->begin_loss_change);
+
+        if (change_number == begin_change_number)
         {
             if (image->conductor_fields.is_reliable)
             {
@@ -824,7 +861,7 @@ int aeron_publication_image_send_pending_loss(aeron_publication_image_t *image)
                             image->session_id,
                             term_id,
                             term_offset,
-                            length);
+                            (int32_t)length);
 
                         if (send_nak_result < 0)
                         {
@@ -1012,7 +1049,8 @@ void aeron_publication_image_check_untethered_subscriptions(
                 case AERON_SUBSCRIPTION_TETHER_RESTING:
                     if (now_ns > (tetherable_position->time_of_last_update_ns + resting_timeout_ns))
                     {
-                        aeron_counter_set_ordered(tetherable_position->value_addr, *image->rcv_pos_position.value_addr);
+                        int64_t join_position = aeron_publication_image_join_position(image);
+                        aeron_counter_set_ordered(tetherable_position->value_addr, join_position);
                         aeron_driver_conductor_on_available_image(
                             conductor,
                             image->conductor_fields.managed_resource.registration_id,
@@ -1043,9 +1081,9 @@ void aeron_publication_image_on_time_event(
         case AERON_PUBLICATION_IMAGE_STATE_ACTIVE:
         {
             int64_t last_packet_timestamp_ns;
-            AERON_GET_VOLATILE(last_packet_timestamp_ns, image->time_of_last_packet_ns);
+            AERON_GET_ACQUIRE(last_packet_timestamp_ns, image->time_of_last_packet_ns);
             bool is_end_of_stream;
-            AERON_GET_VOLATILE(is_end_of_stream, image->is_end_of_stream);
+            AERON_GET_ACQUIRE(is_end_of_stream, image->is_end_of_stream);
 
             if (!aeron_driver_subscribable_has_working_positions(&image->conductor_fields.subscribable) ||
                 now_ns > (last_packet_timestamp_ns + image->conductor_fields.liveness_timeout_ns) ||
@@ -1055,7 +1093,7 @@ void aeron_publication_image_on_time_event(
             {
                 image->conductor_fields.state = AERON_PUBLICATION_IMAGE_STATE_DRAINING;
                 image->conductor_fields.time_of_last_state_change_ns = now_ns;
-                AERON_PUT_ORDERED(image->is_sending_eos_sm, true);
+                AERON_SET_RELEASE(image->is_sending_eos_sm, true);
             }
 
             aeron_publication_image_check_untethered_subscriptions(conductor, image, now_ns);
@@ -1098,12 +1136,26 @@ void aeron_publication_image_on_time_event(
 
 void aeron_publication_image_receiver_release(aeron_publication_image_t *image)
 {
-    AERON_PUT_ORDERED(image->has_receiver_released, true);
+    AERON_SET_RELEASE(image->has_receiver_released, true);
+}
+
+void aeron_publication_image_invalidate(aeron_publication_image_t *image, int32_t reason_length, const char *reason)
+{
+    aeron_alloc((void **)&image->invalidation_reason, reason_length + 1);
+    memcpy((void *)image->invalidation_reason, reason, reason_length);
 }
 
 void aeron_publication_image_remove_response_session_id(aeron_publication_image_t *image)
 {
     aeron_publication_image_set_response_session_id(image, AERON_PUBLICATION_RESPONSE_NULL_RESPONSE_SESSION_ID);
+}
+
+void aeron_publication_image_stop_status_messages_if_not_active(aeron_publication_image_t *image)
+{
+    if (AERON_PUBLICATION_IMAGE_STATE_ACTIVE != image->conductor_fields.state)
+    {
+        image->is_sm_enabled = false;
+    }
 }
 
 extern bool aeron_publication_image_is_heartbeat(const uint8_t *buffer, size_t length);

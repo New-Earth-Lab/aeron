@@ -29,6 +29,7 @@ import io.aeron.exceptions.TimeoutException;
 import io.aeron.security.CredentialsSupplier;
 import io.aeron.security.NullCredentialsSupplier;
 import io.aeron.version.Versioned;
+import org.agrona.BitUtil;
 import org.agrona.CloseHelper;
 import org.agrona.ErrorHandler;
 import org.agrona.LangUtil;
@@ -39,15 +40,15 @@ import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.NoOpLock;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static io.aeron.archive.client.AeronArchive.Configuration.MESSAGE_TIMEOUT_DEFAULT_NS;
+import static io.aeron.CommonContext.*;
 import static io.aeron.archive.client.ArchiveProxy.DEFAULT_RETRY_ATTEMPTS;
 import static io.aeron.driver.Configuration.*;
-import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.agrona.SystemUtil.getDurationInNanos;
 import static org.agrona.SystemUtil.getSizeAsInt;
 
@@ -1244,7 +1245,7 @@ public final class AeronArchive implements AutoCloseable
             }
 
             final int replaySessionId = (int)pollForResponse(lastCorrelationId);
-            replayChannelUri.put(CommonContext.SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
+            replayChannelUri.put(SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
 
             return aeron.addSubscription(replayChannelUri.toString(), replayStreamId);
         }
@@ -1298,7 +1299,7 @@ public final class AeronArchive implements AutoCloseable
             }
 
             final int replaySessionId = (int)pollForResponse(lastCorrelationId);
-            replayChannelUri.put(CommonContext.SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
+            replayChannelUri.put(SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
 
             return aeron.addSubscription(
                 replayChannelUri.toString(), replayStreamId, availableImageHandler, unavailableImageHandler);
@@ -1352,7 +1353,7 @@ public final class AeronArchive implements AutoCloseable
             }
 
             final int replaySessionId = (int)pollForResponse(lastCorrelationId);
-            replayChannelUri.put(CommonContext.SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
+            replayChannelUri.put(SESSION_ID_PARAM_NAME, Integer.toString(replaySessionId));
 
             return aeron.addSubscription(replayChannelUri.toString(), replayStreamId);
         }
@@ -1544,7 +1545,7 @@ public final class AeronArchive implements AutoCloseable
     /**
      * Get the stop position for a recording.
      *
-     * @param recordingId of the active recording for which the position is required.
+     * @param recordingId of the recording for which the position is required.
      * @return the stop position, or {@link #NULL_POSITION} if still active.
      * @see #getRecordingPosition(long)
      */
@@ -1572,10 +1573,11 @@ public final class AeronArchive implements AutoCloseable
     }
 
     /**
-     * Get the stop or active recorded position of a recording.
+     * Get the max recorded position of a recording. For active recordings it will be the recording position,
+     * and for inactive recordings it will be the stop position.
      *
-     * @param recordingId of the recording that the stop of active recording position is being requested for.
-     * @return the length of the recording.
+     * @param recordingId of the recording for which the position is required.
+     * @return the max recorded position of the recording.
      * @since 1.44.0
      */
     public long getMaxRecordedPosition(final long recordingId)
@@ -1590,7 +1592,7 @@ public final class AeronArchive implements AutoCloseable
 
             if (!archiveProxy.getMaxRecordedPosition(recordingId, lastCorrelationId, controlSessionId))
             {
-                throw new ArchiveException("failed to send get recorded length request");
+                throw new ArchiveException("failed to send get max recorded position request");
             }
 
             return pollForResponse(lastCorrelationId);
@@ -2633,7 +2635,7 @@ public final class AeronArchive implements AutoCloseable
          * Channel for sending control messages to a driver local archive. Default to IPC.
          */
         @Config
-        public static final String LOCAL_CONTROL_CHANNEL_DEFAULT = CommonContext.IPC_CHANNEL;
+        public static final String LOCAL_CONTROL_CHANNEL_DEFAULT = "aeron:ipc?term-length=64k";
 
         /**
          * Stream id within a channel for sending control messages to a driver local archive.
@@ -2917,13 +2919,21 @@ public final class AeronArchive implements AutoCloseable
      */
     public static final class Context implements Cloneable
     {
-        /**
-         * Using an integer because there is no support for boolean. 1 is concluded, 0 is not concluded.
-         */
-        private static final AtomicIntegerFieldUpdater<Context> IS_CONCLUDED_UPDATER = newUpdater(
-            Context.class, "isConcluded");
-        private volatile int isConcluded;
+        private static final VarHandle IS_CONCLUDED_VH;
 
+        static
+        {
+            try
+            {
+                IS_CONCLUDED_VH = MethodHandles.lookup().findVarHandle(Context.class, "isConcluded", boolean.class);
+            }
+            catch (final ReflectiveOperationException ex)
+            {
+                throw new ExceptionInInitializerError(ex);
+            }
+        }
+
+        private volatile boolean isConcluded;
         private long messageTimeoutNs = Configuration.messageTimeoutNs();
         private String recordingEventsChannel = AeronArchive.Configuration.recordingEventsChannel();
         private int recordingEventsStreamId = AeronArchive.Configuration.recordingEventsStreamId();
@@ -2936,7 +2946,7 @@ public final class AeronArchive implements AutoCloseable
         private int controlMtuLength = Configuration.controlMtuLength();
         private IdleStrategy idleStrategy;
         private Lock lock;
-        private String aeronDirectoryName = CommonContext.getAeronDirectoryName();
+        private String aeronDirectoryName = getAeronDirectoryName();
         private Aeron aeron;
         private ErrorHandler errorHandler;
         private CredentialsSupplier credentialsSupplier;
@@ -2966,7 +2976,7 @@ public final class AeronArchive implements AutoCloseable
          */
         public void conclude()
         {
-            if (0 != IS_CONCLUDED_UPDATER.getAndSet(this, 1))
+            if ((boolean)IS_CONCLUDED_VH.getAndSet(this, true))
             {
                 throw new ConcurrentConcludeException();
             }
@@ -3006,8 +3016,16 @@ public final class AeronArchive implements AutoCloseable
                 lock = new ReentrantLock();
             }
 
-            controlRequestChannel = applyDefaultParams(controlRequestChannel);
-            controlResponseChannel = applyDefaultParams(controlResponseChannel);
+            final ChannelUri requestChannel = applyDefaultParams(controlRequestChannel);
+            final ChannelUri responseChannel = applyDefaultParams(controlResponseChannel);
+            if (!CONTROL_MODE_RESPONSE.equals(responseChannel.get(MDC_CONTROL_MODE_PARAM_NAME)))
+            {
+                final String sessionId = Integer.toString(BitUtil.generateRandomisedId());
+                requestChannel.put(SESSION_ID_PARAM_NAME, sessionId);
+                responseChannel.put(SESSION_ID_PARAM_NAME, sessionId);
+            }
+            controlRequestChannel = requestChannel.toString();
+            controlResponseChannel = responseChannel.toString();
         }
 
         /**
@@ -3017,7 +3035,7 @@ public final class AeronArchive implements AutoCloseable
          */
         public boolean isConcluded()
         {
-            return 1 == isConcluded;
+            return isConcluded;
         }
 
         /**
@@ -3042,7 +3060,7 @@ public final class AeronArchive implements AutoCloseable
         @Config
         public long messageTimeoutNs()
         {
-            return messageTimeoutNs;
+            return checkDebugTimeout(messageTimeoutNs, TimeUnit.NANOSECONDS);
         }
 
         /**
@@ -3521,26 +3539,26 @@ public final class AeronArchive implements AutoCloseable
                 "\n}";
         }
 
-        private String applyDefaultParams(final String channel)
+        private ChannelUri applyDefaultParams(final String channel)
         {
             final ChannelUri channelUri = ChannelUri.parse(channel);
 
-            if (!channelUri.containsKey(CommonContext.TERM_LENGTH_PARAM_NAME))
+            if (!channelUri.containsKey(TERM_LENGTH_PARAM_NAME))
             {
-                channelUri.put(CommonContext.TERM_LENGTH_PARAM_NAME, Integer.toString(controlTermBufferLength));
+                channelUri.put(TERM_LENGTH_PARAM_NAME, Integer.toString(controlTermBufferLength));
             }
 
-            if (!channelUri.containsKey(CommonContext.MTU_LENGTH_PARAM_NAME))
+            if (!channelUri.containsKey(MTU_LENGTH_PARAM_NAME))
             {
-                channelUri.put(CommonContext.MTU_LENGTH_PARAM_NAME, Integer.toString(controlMtuLength));
+                channelUri.put(MTU_LENGTH_PARAM_NAME, Integer.toString(controlMtuLength));
             }
 
-            if (!channelUri.containsKey(CommonContext.SPARSE_PARAM_NAME))
+            if (!channelUri.containsKey(SPARSE_PARAM_NAME))
             {
-                channelUri.put(CommonContext.SPARSE_PARAM_NAME, Boolean.toString(controlTermBufferSparse));
+                channelUri.put(SPARSE_PARAM_NAME, Boolean.toString(controlTermBufferSparse));
             }
 
-            return channelUri.toString();
+            return channelUri;
         }
     }
 
@@ -3554,15 +3572,45 @@ public final class AeronArchive implements AutoCloseable
          */
         public enum State
         {
+            /**
+             * Initial state of adding a publication for control request channel.
+             */
             ADD_PUBLICATION(0),
+            /**
+             * Await publication being added.
+             */
             AWAIT_PUBLICATION_CONNECTED(1),
+            /**
+             * Sending {@code connect} request to the Archive.
+             */
             SEND_CONNECT_REQUEST(2),
+            /**
+             * Await response subscription connected.
+             */
             AWAIT_SUBSCRIPTION_CONNECTED(3),
+            /**
+             * Await connect response.
+             */
             AWAIT_CONNECT_RESPONSE(4),
+            /**
+             * Send {@code archive-id} request.
+             */
             SEND_ARCHIVE_ID_REQUEST(5),
+            /**
+             * Await response for the {@code archive-id} request.
+             */
             AWAIT_ARCHIVE_ID_RESPONSE(6),
+            /**
+             * Archive connection established.
+             */
             DONE(7),
+            /**
+             * Sending a challenge response.
+             */
             SEND_CHALLENGE_RESPONSE(8),
+            /**
+             * Await challenge response.
+             */
             AWAIT_CHALLENGE_RESPONSE(9);
 
             final int step;
@@ -3909,6 +3957,7 @@ public final class AeronArchive implements AutoCloseable
         replayParams.replayToken(replayToken);
         final Subscription replaySubscription = aeron.addSubscription(replayChannel, replayStreamId);
         final ChannelUriStringBuilder uriBuilder = new ChannelUriStringBuilder(context.controlRequestChannel())
+            .sessionId((Integer)null)
             .responseCorrelationId(replaySubscription.registrationId())
             .termId((Integer)null).initialTermId((Integer)null).termOffset((Integer)null)
             .termLength(64 * 1024)
@@ -3978,6 +4027,7 @@ public final class AeronArchive implements AutoCloseable
 
         replayParams.replayToken(replayToken);
         final ChannelUriStringBuilder uriBuilder = new ChannelUriStringBuilder(context.controlRequestChannel())
+            .sessionId((Integer)null)
             .responseCorrelationId(replayParams.subscriptionRegistrationId())
             .termId((Integer)null).initialTermId((Integer)null).termOffset((Integer)null)
             .termLength(64 * 1024)

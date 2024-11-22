@@ -69,6 +69,7 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.zip.CRC32;
 
@@ -1940,6 +1941,7 @@ class ClusterTest
 
     @Test
     @InterruptAfter(20)
+    @SuppressWarnings("MethodLength")
     void shouldTrackSnapshotDuration()
     {
         final long service1SnapshotDelayMs = 111;
@@ -2011,11 +2013,36 @@ class ClusterTest
             greaterThanOrEqualTo(percent90(MILLISECONDS.toNanos(service1SnapshotDelayMs))));
 
         assertEquals(1, service2SnapshotDurationTracker.snapshotDurationThresholdExceededCount().get());
-
-
         assertThat(
             service2SnapshotDurationTracker.maxSnapshotDuration().get(),
             greaterThanOrEqualTo(percent90(MILLISECONDS.toNanos(service2SnapshotDelayMs))));
+
+        for (final TestNode follower : cluster.followers())
+        {
+            final SnapshotDurationTracker snapshotDurationTracker = follower.consensusModule().context()
+                .totalSnapshotDurationTracker();
+            assertEquals(1, snapshotDurationTracker.snapshotDurationThresholdExceededCount().get());
+            assertThat(
+                snapshotDurationTracker.maxSnapshotDuration().get(),
+                greaterThanOrEqualTo(
+                percent90(MILLISECONDS.toNanos(Math.max(service1SnapshotDelayMs, service2SnapshotDelayMs)))));
+
+            final SnapshotDurationTracker service1SnapshotTracker = follower.container(0).context()
+                .snapshotDurationTracker();
+
+            assertEquals(1, service1SnapshotTracker.snapshotDurationThresholdExceededCount().get());
+            assertThat(
+                service1SnapshotTracker.maxSnapshotDuration().get(),
+                greaterThanOrEqualTo(percent90(MILLISECONDS.toNanos(service1SnapshotDelayMs))));
+
+            final SnapshotDurationTracker service2SnapshotTracker = follower.container(1).context()
+                .snapshotDurationTracker();
+
+            assertEquals(1, service2SnapshotTracker.snapshotDurationThresholdExceededCount().get());
+            assertThat(
+                service2SnapshotTracker.maxSnapshotDuration().get(),
+                greaterThanOrEqualTo(percent90(MILLISECONDS.toNanos(service1SnapshotDelayMs))));
+        }
     }
 
     private static long percent90(final long value)
@@ -2162,15 +2189,13 @@ class ClusterTest
     }
 
     @ParameterizedTest
-    @ValueSource(ints = { 1, 1000 })
+    @ValueSource(ints = { 20, 100 })
     @InterruptAfter(90)
     @DisabledOnOs(OS.MAC)
     void shouldCatchupFollowerWithSlowService(final int sleepTimeMs)
     {
-        cluster = aCluster()
-            .withLogChannel("aeron:udp?term-length=1m|alias=raft")
-            .withStaticNodes(3)
-            .withServiceSupplier((i) -> new TestNode.TestService[]
+        final IntFunction<TestNode.TestService[]> serviceSupplier =
+            (i) -> new TestNode.TestService[]
             {
                 new TestNode.TestService().index(i),
                 new TestNode.TestService()
@@ -2187,36 +2212,39 @@ class ClusterTest
                         messageCount.incrementAndGet();
                     }
                 }.index(i)
-            })
+            };
+
+        cluster = aCluster()
+            .withLogChannel("aeron:udp?term-length=1m|alias=log")
+            .withStaticNodes(3)
+            .withServiceSupplier(serviceSupplier)
             .start();
+
         systemTestWatcher.cluster(cluster);
 
-        final TestNode leader = cluster.awaitLeader();
-        TestNode followerA = cluster.followers().get(0);
-        final TestNode followerB = cluster.followers().get(1);
-
+        cluster.awaitLeader();
         cluster.connectClient();
 
-        final int firstBatch = (int)(SECONDS.toMillis(5) / sleepTimeMs);
-        cluster.sendMessages(firstBatch);
-        cluster.awaitResponseMessageCount(firstBatch);
-        cluster.awaitServicesMessageCount(firstBatch);
+        final int firstBatchCount = (int)(SECONDS.toMillis(5) / sleepTimeMs);
+        cluster.sendMessages(firstBatchCount);
+        cluster.awaitResponseMessageCount(firstBatchCount);
+        cluster.awaitServicesMessageCount(firstBatchCount);
 
+        final TestNode followerA = cluster.followers().get(0);
+        final TestNode followerB = cluster.followers().get(1);
         cluster.stopNode(followerA);
 
-        final int secondBatch = (int)(SECONDS.toMillis(7) / sleepTimeMs);
-        cluster.sendMessages(secondBatch);
-        cluster.awaitResponseMessageCount(firstBatch + secondBatch);
-        cluster.awaitServiceMessageCount(leader, firstBatch + secondBatch);
-        cluster.awaitServiceMessageCount(followerB, firstBatch + secondBatch);
+        final int secondBatchCount = (int)(SECONDS.toMillis(7) / sleepTimeMs);
+        cluster.sendMessages(secondBatchCount);
+        cluster.awaitResponseMessageCount(firstBatchCount + secondBatchCount);
+        cluster.awaitServiceMessageCount(followerB, firstBatchCount + secondBatchCount);
 
-        followerA = cluster.startStaticNode(followerA.index(), false);
-        assertNotNull(followerA);
+        cluster.startStaticNode(followerA.index(), false);
 
-        final int thirdBatch = (int)(SECONDS.toMillis(3) / sleepTimeMs);
-        cluster.sendMessages(thirdBatch);
-        cluster.awaitResponseMessageCount(firstBatch + secondBatch + thirdBatch);
-        cluster.awaitServicesMessageCount(firstBatch + secondBatch + thirdBatch);
+        final int thirdBatchCount = (int)(SECONDS.toMillis(3) / sleepTimeMs);
+        cluster.sendMessages(thirdBatchCount);
+        cluster.awaitResponseMessageCount(firstBatchCount + secondBatchCount + thirdBatchCount);
+        cluster.awaitServicesMessageCount(firstBatchCount + secondBatchCount + thirdBatchCount);
     }
 
     @Test

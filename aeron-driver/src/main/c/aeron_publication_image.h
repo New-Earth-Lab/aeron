@@ -132,10 +132,13 @@ typedef struct aeron_publication_image_stct
 
     int64_t last_sm_change_number;
     int64_t last_sm_position;
-    int64_t time_of_last_sm_ns;
+    int64_t next_sm_deadline_ns;
     int64_t sm_timeout_ns;
 
     int64_t time_of_last_packet_ns;
+    const char *invalidation_reason;
+
+    bool is_sm_enabled;
 
     volatile int64_t response_session_id;
 
@@ -218,6 +221,8 @@ void aeron_publication_image_on_time_event(
 
 void aeron_publication_image_receiver_release(aeron_publication_image_t *image);
 
+void aeron_publication_image_invalidate(aeron_publication_image_t *image, int32_t reason_length, const char *reason);
+
 inline bool aeron_publication_image_is_heartbeat(const uint8_t *buffer, size_t length)
 {
     return length == AERON_DATA_HEADER_LENGTH && 0 == ((aeron_frame_header_t *)buffer)->frame_length;
@@ -258,11 +263,13 @@ inline void aeron_publication_image_schedule_status_message(
 {
     const int64_t change_number = image->begin_sm_change + 1;
 
-    AERON_PUT_ORDERED(image->begin_sm_change, change_number);
+    AERON_SET_RELEASE(image->begin_sm_change, change_number);
     aeron_release();
+
     image->next_sm_position = sm_position;
     image->next_sm_receiver_window_length = window_length;
-    AERON_PUT_ORDERED(image->end_sm_change, change_number);
+
+    AERON_SET_RELEASE(image->end_sm_change, change_number);
 }
 
 inline bool aeron_publication_image_is_drained(aeron_publication_image_t *image)
@@ -329,7 +336,7 @@ inline bool aeron_publication_image_has_send_response_setup(aeron_publication_im
 inline void aeron_publication_image_set_response_session_id(
     aeron_publication_image_t *image, int64_t response_session_id)
 {
-    AERON_PUT_ORDERED(image->response_session_id, response_session_id);
+    AERON_SET_RELEASE(image->response_session_id, response_session_id);
 }
 
 void aeron_publication_image_remove_response_session_id(aeron_publication_image_t *image);
@@ -355,5 +362,7 @@ inline int64_t aeron_publication_image_join_position(aeron_publication_image_t *
 
     return position;
 }
+
+void aeron_publication_image_stop_status_messages_if_not_active(aeron_publication_image_t *image);
 
 #endif //AERON_PUBLICATION_IMAGE_H

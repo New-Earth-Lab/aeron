@@ -171,15 +171,22 @@ bool aeron_data_packet_dispatcher_match_no_subscription(void *clientd, int64_t k
 
 int aeron_data_packet_dispatcher_add_subscription(aeron_data_packet_dispatcher_t *dispatcher, int32_t stream_id)
 {
-    aeron_data_packet_dispatcher_stream_interest_t *stream_interest;
+    aeron_data_packet_dispatcher_stream_interest_t *stream_interest = aeron_int64_to_ptr_hash_map_get(
+        &dispatcher->session_by_stream_id_map, stream_id);
 
-    if ((stream_interest = aeron_int64_to_ptr_hash_map_get(&dispatcher->session_by_stream_id_map, stream_id)) == NULL)
+    if (NULL == stream_interest)
     {
-        if (aeron_alloc((void **)&stream_interest, sizeof(aeron_data_packet_dispatcher_stream_interest_t)) < 0 ||
-            aeron_data_packet_dispatcher_stream_interest_init(stream_interest, true) < 0 ||
+        if (aeron_alloc((void **)&stream_interest, sizeof(aeron_data_packet_dispatcher_stream_interest_t)) < 0)
+        {
+            AERON_APPEND_ERR("%s", "Failed to allocate stream_interest");
+            return -1;
+        }
+
+        if (aeron_data_packet_dispatcher_stream_interest_init(stream_interest, true) < 0 ||
             aeron_int64_to_ptr_hash_map_put(&dispatcher->session_by_stream_id_map, stream_id, stream_interest) < 0)
         {
             AERON_APPEND_ERR("%s", "Failed to add stream_interest to session_by_stream_id_map");
+            aeron_free(stream_interest);
             return -1;
         }
     }
@@ -255,7 +262,7 @@ int aeron_data_packet_dispatcher_remove_subscription(aeron_data_packet_dispatche
 
     stream_interest->is_all_sessions = false;
 
-    if (0 == stream_interest->image_by_session_id_map.size && 0 == stream_interest->state_by_session_id_map.size)
+    if (0 == stream_interest->image_by_session_id_map.size && 0 == stream_interest->subscribed_sessions.size)
     {
         aeron_int64_to_ptr_hash_map_remove(&dispatcher->session_by_stream_id_map, stream_id);
         aeron_data_packet_dispatcher_stream_interest_delete(stream_interest);

@@ -44,6 +44,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.net.StandardSocketOptions;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
@@ -53,7 +55,6 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Consumer;
 
 import static io.aeron.CncFileDescriptor.*;
@@ -63,7 +64,6 @@ import static io.aeron.driver.status.SystemCounterDescriptor.CONTROLLABLE_IDLE_S
 import static io.aeron.driver.status.SystemCounterDescriptor.*;
 import static io.aeron.logbuffer.LogBufferDescriptor.TERM_MAX_LENGTH;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.IoUtil.mapNewFile;
 import static org.agrona.SystemUtil.loadPropertiesFiles;
@@ -144,7 +144,9 @@ public final class MediaDriver implements AutoCloseable
             {
                 case INVOKER:
                     sharedInvoker = new AgentInvoker(
-                        errorHandler, errorCounter, new CompositeAgent(sender, receiver, conductor));
+                        errorHandler,
+                        errorCounter,
+                        new NamedCompositeAgent(ctx.aeronDirectoryName(), sender, receiver, conductor));
                     sharedRunner = null;
                     sharedNetworkRunner = null;
                     conductorRunner = null;
@@ -157,7 +159,7 @@ public final class MediaDriver implements AutoCloseable
                         ctx.sharedIdleStrategy(),
                         errorHandler,
                         errorCounter,
-                        new CompositeAgent(sender, receiver, conductor));
+                        new NamedCompositeAgent(ctx.aeronDirectoryName(), sender, receiver, conductor));
                     sharedNetworkRunner = null;
                     conductorRunner = null;
                     receiverRunner = null;
@@ -170,7 +172,7 @@ public final class MediaDriver implements AutoCloseable
                         ctx.sharedNetworkIdleStrategy(),
                         errorHandler,
                         errorCounter,
-                        new CompositeAgent(sender, receiver));
+                        new NamedCompositeAgent(ctx.aeronDirectoryName(), sender, receiver));
                     conductorRunner = new AgentRunner(
                         ctx.conductorIdleStrategy(), errorHandler, errorCounter, conductor);
                     sharedRunner = null;
@@ -412,6 +414,14 @@ public final class MediaDriver implements AutoCloseable
     }
 
     /**
+     * {@inheritDoc}
+     */
+    public String toString()
+    {
+        return "MediaDriver{" + ctx.aeronDirectoryName() + '}';
+    }
+
+    /**
      * Context for the {@link MediaDriver} that can be used to provide overrides for {@link Configuration}.
      * <p>
      * <b>Note:</b> Do not reuse instances of this {@link Context} across different {@link MediaDriver}s.
@@ -421,10 +431,20 @@ public final class MediaDriver implements AutoCloseable
      */
     public static final class Context extends CommonContext
     {
-        private static final AtomicIntegerFieldUpdater<MediaDriver.Context> IS_CLOSED_UPDATER = newUpdater(
-            MediaDriver.Context.class, "isClosed");
+        private static final VarHandle IS_CLOSED_VH;
+        static
+        {
+            try
+            {
+                IS_CLOSED_VH = MethodHandles.lookup().findVarHandle(Context.class, "isClosed", boolean.class);
+            }
+            catch (final ReflectiveOperationException ex)
+            {
+                throw new ExceptionInInitializerError(ex);
+            }
+        }
 
-        private volatile int isClosed;
+        private volatile boolean isClosed;
         private boolean printConfigurationOnStart = Configuration.printConfigurationOnStart();
         private boolean useWindowsHighResTimer = Configuration.useWindowsHighResTimer();
         private boolean warnIfDirectoryExists = Configuration.warnIfDirExists();
@@ -529,6 +549,7 @@ public final class MediaDriver implements AutoCloseable
 
         private DistinctErrorLog errorLog;
         private ErrorHandler errorHandler;
+        private CountedErrorHandler countedErrorHandler;
         private boolean useConcurrentCountersManager;
         private CountersManager countersManager;
         private SystemCounters systemCounters;
@@ -581,9 +602,10 @@ public final class MediaDriver implements AutoCloseable
          */
         public void close()
         {
-            if (IS_CLOSED_UPDATER.compareAndSet(this, 0, 1))
+            if (IS_CLOSED_VH.compareAndSet(this, false, true))
             {
                 CloseHelper.close(errorHandler, logFactory);
+                CloseHelper.close(errorHandler, countedErrorHandler);
 
                 if (null != systemCounters)
                 {
@@ -3673,6 +3695,17 @@ public final class MediaDriver implements AutoCloseable
             return this;
         }
 
+        /**
+         * Counted error handler that wraps {@link #errorHandler()} and
+         * {@link io.aeron.driver.status.SystemCounterDescriptor#ERRORS} counter.
+         *
+         * @return counted error handler.
+         */
+        public CountedErrorHandler countedErrorHandler()
+        {
+            return countedErrorHandler;
+        }
+
         OneToOneConcurrentArrayQueue<Runnable> receiverCommandQueue()
         {
             return receiverCommandQueue;
@@ -3805,6 +3838,12 @@ public final class MediaDriver implements AutoCloseable
             return this;
         }
 
+        Context countedErrorHandler(final CountedErrorHandler countedErrorHandler)
+        {
+            this.countedErrorHandler = countedErrorHandler;
+            return this;
+        }
+
         int osDefaultSocketRcvbufLength()
         {
             resolveOsSocketBufLengths();
@@ -3912,11 +3951,6 @@ public final class MediaDriver implements AutoCloseable
                 receiveChannelEndpointSupplier = Configuration.receiveChannelEndpointSupplier();
             }
 
-            if (null == dataTransportPoller)
-            {
-                dataTransportPoller = new DataTransportPoller(errorHandler);
-            }
-
             if (null == applicationSpecificFeedback)
             {
                 applicationSpecificFeedback = Configuration.applicationSpecificFeedback();
@@ -4018,7 +4052,7 @@ public final class MediaDriver implements AutoCloseable
                 }
                 else
                 {
-                    asyncTaskExecutor = newDefaultAsyncTaskExecutor(asyncTaskExecutorThreads);
+                    asyncTaskExecutor = newDefaultAsyncTaskExecutor(asyncTaskExecutorThreads, aeronDirectoryName());
                 }
             }
 
@@ -4028,7 +4062,7 @@ public final class MediaDriver implements AutoCloseable
             }
         }
 
-        private static ThreadPoolExecutor newDefaultAsyncTaskExecutor(final int threadCount)
+        private static ThreadPoolExecutor newDefaultAsyncTaskExecutor(final int threadCount, final String dirName)
         {
             final AtomicInteger id = new AtomicInteger();
             final ThreadPoolExecutor executor = new ThreadPoolExecutor(
@@ -4039,7 +4073,9 @@ public final class MediaDriver implements AutoCloseable
                 new LinkedBlockingQueue<>(),
                 (r) ->
                 {
-                    final Thread thread = new Thread(r, "async-task-executor-" + id.getAndIncrement());
+                    final Thread thread = new Thread(
+                        r,
+                        "async-task-executor-" + id.getAndIncrement() + " " + dirName);
                     thread.setDaemon(true);
                     return thread;
                 });
@@ -4081,6 +4117,7 @@ public final class MediaDriver implements AutoCloseable
             systemCounters.get(AERON_VERSION).set(aeronVersion);
         }
 
+        @SuppressWarnings("MethodLength")
         private void concludeDependantProperties()
         {
             clientProxy = new ClientProxy(new BroadcastTransmitter(
@@ -4094,7 +4131,12 @@ public final class MediaDriver implements AutoCloseable
                     createErrorLogBuffer(cncByteBuffer, cncMetaDataBuffer), epochClock, US_ASCII);
             }
 
-            errorHandler = CommonContext.setupErrorHandler(this.errorHandler, errorLog);
+            errorHandler = CommonContext.setupErrorHandler(errorHandler, errorLog);
+
+            if (null == countedErrorHandler)
+            {
+                countedErrorHandler = new CountedErrorHandler(errorHandler, systemCounters.get(ERRORS));
+            }
 
             receiverProxy = new ReceiverProxy(
                 threadingMode, receiverCommandQueue, systemCounters.get(RECEIVER_PROXY_FAILS));
@@ -4105,7 +4147,12 @@ public final class MediaDriver implements AutoCloseable
 
             if (null == controlTransportPoller)
             {
-                controlTransportPoller = new ControlTransportPoller(errorHandler, driverConductorProxy);
+                controlTransportPoller = new ControlTransportPoller(countedErrorHandler, driverConductorProxy);
+            }
+
+            if (null == dataTransportPoller)
+            {
+                dataTransportPoller = new DataTransportPoller(countedErrorHandler);
             }
 
             if (null == logFactory)
@@ -4258,7 +4305,7 @@ public final class MediaDriver implements AutoCloseable
             return "MediaDriver.Context" +
                 "\n{" +
                 "\n    isConcluded=" + isConcluded() +
-                "\n    isClosed=" + (1 == isClosed) +
+                "\n    isClosed=" + isClosed +
                 "\n    cncVersion=" + SemanticVersion.toString(CNC_VERSION) +
                 "\n    aeronDirectory=" + aeronDirectory() +
                 "\n    enabledExperimentalFeatures=" + enableExperimentalFeatures() +

@@ -21,6 +21,8 @@ import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.client.ReplayParams;
 import io.aeron.driver.MediaDriver;
+import io.aeron.test.EventLogExtension;
+import io.aeron.test.InterruptingTestCallback;
 import io.aeron.test.SystemTestWatcher;
 import io.aeron.test.TestContexts;
 import io.aeron.test.Tests;
@@ -32,14 +34,17 @@ import org.agrona.concurrent.YieldingIdleStrategy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+@ExtendWith({ EventLogExtension.class, InterruptingTestCallback.class })
 public class ArchiveResponseClientTest
 {
     @RegisterExtension
@@ -58,8 +63,8 @@ public class ArchiveResponseClientTest
             .publicationTermBufferLength(termLength)
             .sharedIdleStrategy(YieldingIdleStrategy.INSTANCE)
             .spiesSimulateConnection(true)
-            .dirDeleteOnStart(true);
-        driverCtx.enableExperimentalFeatures(true);
+            .dirDeleteOnStart(true)
+            .enableExperimentalFeatures(true);
 
         final Archive.Context archiveContext = TestContexts.localhostArchive()
             .aeronDirectoryName(driverCtx.aeronDirectoryName())
@@ -81,8 +86,7 @@ public class ArchiveResponseClientTest
     @AfterEach
     void tearDown()
     {
-        CloseHelper.quietCloseAll(archive);
-        CloseHelper.quietCloseAll(driver);
+        CloseHelper.closeAll(archive, driver);
     }
 
     @Test
@@ -211,11 +215,11 @@ public class ArchiveResponseClientTest
         "aeron:udp?control-mode=response|control=localhost:10002",
         "aeron:udp?endpoint=localhost:10002"
     })
-    void shouldAsyncConnectUsingResponseChannel(final String channel)
+    void shouldAsyncConnectUsingResponseChannel(final String responseChannel)
     {
         final AeronArchive.Context aeronArchiveCtx = new AeronArchive.Context()
             .controlRequestChannel(archive.context().controlChannel())
-            .controlResponseChannel(channel);
+            .controlResponseChannel(responseChannel);
         try (AeronArchive.AsyncConnect asyncConnect = AeronArchive.asyncConnect(aeronArchiveCtx))
         {
             AeronArchive aeronArchive;
@@ -223,9 +227,16 @@ public class ArchiveResponseClientTest
             {
                 Tests.yield();
             }
-            assertNotEquals(Aeron.NULL_VALUE, aeronArchive.controlSessionId());
 
-            CloseHelper.close(aeronArchive);
+            try
+            {
+                assertNotEquals(Aeron.NULL_VALUE, aeronArchive.controlSessionId());
+                assertEquals(archive.context().archiveId(), aeronArchive.archiveId());
+            }
+            finally
+            {
+                CloseHelper.close(aeronArchive);
+            }
         }
     }
 }
