@@ -16,12 +16,12 @@
 
 include(CheckSymbolExists)
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi winmm)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
 
-if (MSVC)
+if (WIN32)
     set(AERON_STATIC_LIB_LINK_OPTS "")
 else()
     # Because dlsym() is used to load strategies.
@@ -53,7 +53,7 @@ if (F_PREALLOCATE_PROTOTYPE_EXISTS)
     add_definitions(-DHAVE_F_PREALLOCATE)
 endif ()
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
     set(BUILD_SHARED_LIBS ON)
 endif ()
