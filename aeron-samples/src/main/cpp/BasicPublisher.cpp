@@ -128,7 +128,7 @@ int main(int argc, char **argv)
 
         for (std::int64_t i = 0; i < settings.numberOfMessages && running; i++)
         {
-#if _MSC_VER
+#if _WIN32
             const int messageLen = ::sprintf_s(message, sizeof(message), "Hello World! %" PRId64, i);
 #else
             const int messageLen = ::snprintf(message, sizeof(message), "Hello World! %" PRId64, i);

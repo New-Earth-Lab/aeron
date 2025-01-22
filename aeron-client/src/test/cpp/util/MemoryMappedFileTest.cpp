@@ -23,7 +23,7 @@
 using namespace aeron::util;
 using namespace aeron::test;
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define unlink _unlink
 #endif
 

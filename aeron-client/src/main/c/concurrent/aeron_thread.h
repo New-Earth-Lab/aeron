@@ -28,7 +28,7 @@ void aeron_nano_sleep(uint64_t nanoseconds);
 void aeron_micro_sleep(unsigned int microseconds);
 int aeron_thread_set_affinity(const char *role_name, uint8_t cpu_affinity_no);
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #include <pthread.h>
 typedef pthread_mutex_t aeron_mutex_t;
@@ -56,10 +56,10 @@ typedef pthread_cond_t aeron_cond_t;
 #define aeron_cond_signal pthread_cond_signal
 #define aeron_cond_wait pthread_cond_wait
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <windows.h>
 
 typedef CRITICAL_SECTION aeron_mutex_t;
 
@@ -79,7 +79,7 @@ typedef CONDITION_VARIABLE aeron_cond_t;
 
 #define AERON_INIT_ONCE_VALUE {0}
 
-void aeron_thread_once(AERON_INIT_ONCE *s_init_once, void *callback);
+void aeron_thread_once(AERON_INIT_ONCE *s_init_once, void (*callback)(void));
 
 int aeron_mutex_init(aeron_mutex_t *mutex, void *attr);
 int aeron_mutex_destroy(aeron_mutex_t *mutex);
@@ -114,11 +114,11 @@ int aeron_cond_signal(aeron_cond_t *cv);
 
 // sched
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 void proc_yield(void);
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 int sched_yield(void);
 #define proc_yield _mm_pause

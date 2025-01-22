@@ -29,7 +29,7 @@
 #include "util/aeron_strutil.h"
 #include "aeron_alloc.h"
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 const char *aeron_dlinfo(const void *addr, char *buffer, size_t max_buffer_length)
 {
@@ -58,11 +58,11 @@ const char *aeron_dlinfo_func(void (*func)(void), char *buffer, size_t max_buffe
     return aeron_dlinfo(addr, buffer, max_buffer_length);
 }
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #include "concurrent/aeron_counters_manager.h"
 #include "aeronc.h"
-#include <Windows.h>
+#include <windows.h>
 
 void *aeron_dlsym_fallback(LPCSTR name)
 {
@@ -261,9 +261,9 @@ int aeron_dl_load_libs_delete(aeron_dl_loaded_libs_state_t *state)
         {
             aeron_dl_loaded_lib_state_t *lib = &state->libs[i];
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
             dlclose(lib->handle);
-#elif defined(AERON_COMPILER_MSVC) && defined(AERON_CPU_X64)
+#elif defined(_WIN32)
             FreeLibrary(lib->handle);
 #else
 #error Unsupported platform!

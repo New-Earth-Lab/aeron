@@ -27,6 +27,10 @@ extern "C"
 #include "util/aeron_netutil.h"
 }
 
+#ifdef _WIN32
+#define strdup _strdup
+#endif
+
 static void assertParamsAreEqual(aeron_uri_params_t *params1, aeron_uri_params_t *params2)
 {
     EXPECT_EQ(params1->length, params2->length);

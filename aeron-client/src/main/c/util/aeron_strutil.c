@@ -164,7 +164,7 @@ int aeron_tokenise(char *input, char delimiter, int max_tokens, char **tokens)
     return num_tokens;
 }
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 
 char *aeron_strndup(const char *value, size_t length)
 {

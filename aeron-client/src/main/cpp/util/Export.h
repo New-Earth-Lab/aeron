@@ -18,7 +18,7 @@
 
 #include "util/Platform.h"
 
-#ifdef AERON_COMPILER_MSVC
+#ifdef _WIN32
 #   if defined CLIENT_SHARED
 #       if defined DLL_EXPORT
 #           define CLIENT_EXPORT __declspec(dllexport)

@@ -19,16 +19,17 @@
 
 #include "util/aeron_platform.h"
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #define aeron_erand48 erand48
 #define aeron_srand48 srand48
 #define aeron_drand48 drand48
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 double aeron_erand48(unsigned short xsubi[3]);
 void aeron_srand48(uint64_t aeron_nano_clock);

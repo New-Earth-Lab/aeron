@@ -25,7 +25,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <unistd.h>
 #endif
 

@@ -134,7 +134,7 @@ if (AERON_HIDE_DEPRECATION_MESSAGE)
 endif (AERON_HIDE_DEPRECATION_MESSAGE)
 
 # all UNIX-based platform compiler flags
-if (UNIX)
+if (UNIX OR MINGW)
     add_compile_options(-fstrict-aliasing -Wall -Wpedantic -Wextra -Wno-unused-parameter -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer)
 
     if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "11.0")
@@ -216,7 +216,7 @@ endif()
 # Project variables, etc.
 
 if (NOT DEFINED GRADLE_WRAPPER)
-    if (MSVC)
+    if (WIN32)
         set(GRADLE_WRAPPER "gradlew.bat" CACHE INTERNAL "Location of the Gradle wrapper script")
     else ()
         set(GRADLE_WRAPPER "./gradlew" CACHE INTERNAL "Location of the Gradle wrapper script")

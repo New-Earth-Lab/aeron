@@ -67,7 +67,7 @@ std::string formatDate(std::int64_t millisecondsSinceEpoch)
     char tzBuffer[8];
     struct tm localTm{};
 
-#ifdef _MSC_VER
+#ifdef _WIN32
     localtime_s(&localTm, &tm);
 #else
     ::localtime_r(&tm, &localTm);

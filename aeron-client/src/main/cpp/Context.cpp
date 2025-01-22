@@ -22,7 +22,7 @@
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif // !NOMINMAX
-    #include <Windows.h>
+    #include <windows.h>
 #else
 #include <unistd.h>
 #include <sys/types.h>
@@ -80,7 +80,7 @@ bool Context::requestDriverTermination(
 #if !defined(__linux__)
 inline static std::string tmpDir()
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     char buff[MAX_PATH + 1];
     std::string dir;
 
@@ -106,7 +106,7 @@ inline static std::string tmpDir()
 
 inline static std::string getUserName()
 {
-#if (_MSC_VER)
+#if (_WIN32)
     const char *username = ::getenv("USER");
 
     if (nullptr == username)
@@ -141,7 +141,7 @@ std::string Context::defaultAeronPath()
 {
 #if defined(__linux__)
     return "/dev/shm/aeron-" + getUserName();
-#elif (_MSC_VER)
+#elif (_WIN32)
     return tmpDir() + "aeron-" + getUserName();
 #else
     return tmpDir() + "/aeron-" + getUserName();

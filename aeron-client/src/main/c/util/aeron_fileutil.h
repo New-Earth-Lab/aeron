@@ -47,13 +47,13 @@ int aeron_unmap(aeron_mapped_file_t *mapped_file);
 
 int aeron_msync(void *addr, size_t length);
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 #include <unistd.h>
 
 #define AERON_FILEUTIL_ERROR_ENOSPC ENOSPC
 
 #define aeron_mkdir mkdir
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 #define _CRT_RAND_S
 #include <io.h>
 #include <direct.h>
@@ -61,9 +61,11 @@ int aeron_msync(void *addr, size_t length);
 #include <winsock2.h>
 #include <windows.h>
 
+#ifdef AERON_COMPILER_MSVC
 #define S_IRWXU 0
 #define S_IRWXG 0
 #define S_IRWXO 0
+#endif
 
 #define AERON_FILEUTIL_ERROR_ENOSPC ERROR_DISK_FULL
 

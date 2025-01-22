@@ -26,7 +26,7 @@
 #include <errno.h>
 #include <inttypes.h>
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
 #include <windows.h>
 #endif
 
@@ -70,7 +70,7 @@ int aeron_alloc_aligned(void **ptr, size_t *offset, size_t size, size_t alignmen
     if (!(AERON_IS_POWER_OF_TWO(alignment)))
     {
         errno = EINVAL;
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
         SetLastError(ERROR_INCORRECT_SIZE);
 #endif
         return -1;
@@ -99,7 +99,7 @@ int aeron_alloc_aligned(void **ptr, size_t *offset, size_t size, size_t alignmen
     return 0;
 }
 
-#if defined(__linux__) || defined(AERON_COMPILER_MSVC)
+#if defined(__linux__) || defined(_WIN32)
 int aeron_reallocf(void **ptr, size_t size)
 {
     void *new_ptr = NULL;
@@ -115,7 +115,7 @@ int aeron_reallocf(void **ptr, size_t size)
             free(*ptr);
             *ptr = NULL;
             errno = ENOMEM;
-#if defined(AERON_COMPILER_MSVC)
+#if defined(_WIN32)
             SetLastError(ERROR_OUTOFMEMORY);
 #endif
             return -1;

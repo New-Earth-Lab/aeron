@@ -19,7 +19,7 @@
 
 #include <util/aeron_platform.h>
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #include <dlfcn.h>
 #include <stddef.h>
@@ -31,7 +31,7 @@
 const char *aeron_dlinfo(const void *, char *buffer, size_t max_buffer_length);
 const char *aeron_dlinfo_func(void (*func)(void), char *buffer, size_t max_buffer_length);
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #define RTLD_DEFAULT ((void *)-123)
 #define RTLD_NEXT ((void *)-124)

@@ -25,13 +25,13 @@ extern "C"
 #include "util/aeron_error.h"
 }
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 #define removeDir remove
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 #define removeDir RemoveDirectoryA
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define AERON_FILE_SEP_STR "\\"
 #else
 #define AERON_FILE_SEP_STR "/"
@@ -125,7 +125,7 @@ TEST_F(FileUtilTest, resolveShouldConcatPaths)
 {
     const char *parent = "this_is_the_parent";
     const char *child = "this_is_the_child";
-#ifdef _MSC_VER
+#ifdef _WIN32
     const char *expected = "this_is_the_parent\\this_is_the_child";
 #else
     const char *expected = "this_is_the_parent/this_is_the_child";

@@ -32,11 +32,11 @@
 #define AERON_EXPORT __declspec(dllimport)
 #endif
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #define aeron_strndup strndup
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 char *aeron_strndup(const char *value, size_t length);
 

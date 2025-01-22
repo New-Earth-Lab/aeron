@@ -29,9 +29,11 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #else
-#include <Windows.h>
+#include <windows.h>
 #include <mmsystem.h>
+#ifdef _MSC_VER
 #pragma comment(lib, "winmm.lib")
+#endif
 
 struct aeron_thread_stct
 {
@@ -47,7 +49,7 @@ struct aeron_thread_stct
 
 void aeron_nano_sleep(uint64_t nanoseconds)
 {
-#ifdef AERON_COMPILER_MSVC
+#ifdef _WIN32
     timeBeginPeriod(1);
 
     HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
@@ -110,7 +112,7 @@ int aeron_thread_set_affinity(const char *role_name, uint8_t cpu_affinity_no)
 #endif
 }
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 void aeron_thread_set_name(const char *role_name)
 {
@@ -122,7 +124,7 @@ void aeron_thread_set_name(const char *role_name)
 }
 
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 static BOOL WINAPI aeron_thread_once_callback(PINIT_ONCE init_once, void (*callback)(void), void **context)
 {
@@ -130,9 +132,9 @@ static BOOL WINAPI aeron_thread_once_callback(PINIT_ONCE init_once, void (*callb
     return TRUE;
 }
 
-void aeron_thread_once(AERON_INIT_ONCE *s_init_once, void *callback)
+void aeron_thread_once(AERON_INIT_ONCE *s_init_once, void (*callback)(void))
 {
-    InitOnceExecuteOnce((PINIT_ONCE)s_init_once, (PINIT_ONCE_FN)aeron_thread_once_callback, callback, NULL);
+    InitOnceExecuteOnce((PINIT_ONCE)s_init_once, (PINIT_ONCE_FN)aeron_thread_once_callback, (PVOID)callback, NULL);
 }
 
 int aeron_mutex_init(aeron_mutex_t *mutex, void *attr)
@@ -330,7 +332,7 @@ int aeron_cond_signal(aeron_cond_t *cv)
 
  // sched
 
-#if defined(AERON_COMPILER_GCC)
+#if defined(AERON_COMPILER_GCC) && !defined(_WIN32)
 
 #include <sched.h>
 
@@ -341,7 +343,7 @@ void proc_yield(void)
 #endif
 }
 
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(_WIN32)
 
 #else
 #error Unsupported platform!

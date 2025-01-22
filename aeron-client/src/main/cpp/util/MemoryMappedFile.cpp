@@ -23,7 +23,7 @@
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif // !NOMINMAX
-    #include <Windows.h>
+    #include <windows.h>
     #include "StringUtil.h"
 #endif
 

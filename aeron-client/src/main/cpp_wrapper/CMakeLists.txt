@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(BUILD_SHARED_LIBS ON)
 endif ()
 
