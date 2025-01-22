@@ -53,8 +53,12 @@ if (F_PREALLOCATE_PROTOTYPE_EXISTS)
     add_definitions(-DHAVE_F_PREALLOCATE)
 endif ()
 
-if (WIN32 AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    if (MSYS OR MINGW)
+        set(AERON_DYNAMIC_LIB_LINK_OPTS "-Wl,--export-all-symbols")
+    else ()
+        set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    endif ()
     set(BUILD_SHARED_LIBS ON)
 endif ()
 
@@ -172,7 +176,8 @@ target_include_directories(aeron_archive_c_client
 target_link_libraries(
     aeron_archive_c_client
     aeron
-    ${CMAKE_THREAD_LIBS_INIT})
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${AERON_DYNAMIC_LIB_LINK_OPTS})
 
 # static library
 add_library(aeron_archive_c_client_static STATIC ${SOURCE} ${HEADERS})

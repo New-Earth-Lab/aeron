@@ -21,13 +21,12 @@ if ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
     add_definitions(-D_DEFAULT_SOURCE)
 endif ()
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    set(BUILD_SHARED_LIBS ON)
-endif ()
-
-if (MINGW AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    # set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    if (MSYS OR MINGW)
+        set(AERON_DYNAMIC_LIB_LINK_OPTS "-Wl,--export-all-symbols")
+    else ()
+        set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    endif ()
     set(BUILD_SHARED_LIBS ON)
 endif ()
 
@@ -405,7 +404,8 @@ target_link_libraries(
     ${AERON_LIB_M_LIBS}
     ${AERON_LIB_ATOMIC_LIBS}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${AERON_LIB_WINSOCK_LIBS})
+    ${AERON_LIB_WINSOCK_LIBS}
+    ${AERON_DYNAMIC_LIB_LINK_OPTS})
 
 target_link_libraries(
     aeron_driver_static
@@ -426,7 +426,8 @@ target_link_libraries(
     ${AERON_LIB_M_LIBS}
     ${AERON_LIB_ATOMIC_LIBS}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${AERON_LIB_WINSOCK_LIBS})
+    ${AERON_LIB_WINSOCK_LIBS}
+    ${AERON_DYNAMIC_LIB_LINK_OPTS})
 
 target_link_libraries(
     aeronmd_s
