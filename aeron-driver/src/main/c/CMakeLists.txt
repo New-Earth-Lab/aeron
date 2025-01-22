@@ -22,8 +22,9 @@ if ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
 endif ()
 
 if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    add_definitions(-DAERON_NO_GETOPT)
     if (MSYS OR MINGW)
-        set(AERON_DYNAMIC_LIB_LINK_OPTS "-Wl,--export-all-symbols")
+        add_link_options("-Wl,--export-all-symbols")
     else ()
         set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
     endif ()
@@ -404,8 +405,7 @@ target_link_libraries(
     ${AERON_LIB_M_LIBS}
     ${AERON_LIB_ATOMIC_LIBS}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${AERON_LIB_WINSOCK_LIBS}
-    ${AERON_DYNAMIC_LIB_LINK_OPTS})
+    ${AERON_LIB_WINSOCK_LIBS})
 
 target_link_libraries(
     aeron_driver_static
@@ -426,8 +426,7 @@ target_link_libraries(
     ${AERON_LIB_M_LIBS}
     ${AERON_LIB_ATOMIC_LIBS}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${AERON_LIB_WINSOCK_LIBS}
-    ${AERON_DYNAMIC_LIB_LINK_OPTS})
+    ${AERON_LIB_WINSOCK_LIBS})
 
 target_link_libraries(
     aeronmd_s
